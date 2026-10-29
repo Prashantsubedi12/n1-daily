@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "exam": "2026-12-06",
+  "start": "2026-10-29",
+  "bank": [
+    "bank/kanji.json",
+    "bank/vocab.json",
+    "bank/grammar.json",
+    "bank/reading.json",
+    "bank/listening.json",
+    "bank/n2.json"
+  ],
+  "daily": [
+    "2026-10-29"
+  ]
+}
