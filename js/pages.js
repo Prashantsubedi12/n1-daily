@@ -240,7 +240,8 @@ export function viewSettings(view) {
         <button class="btn primary" id="ghSync">今すぐ同期</button>
         <button class="btn" id="ghRestore">GitHubから復元</button>
       </div>
-      <p class="small muted" id="ghStatus">最終同期：${ago(st.sync.last)}${st.sync.error ? ` ・<span class="ng">${esc(st.sync.error)}</span>` : ''}</p>
+      <p class="small muted" id="ghStatus">最終同期：${ago(st.sync.last)}・この端末の解答 ${sync.localCount()}問${st.sync.error ? ` ・<span class="ng">${esc(st.sync.error)}</span>` : ''}</p>
+      <p class="small muted">※ iPhoneの「ホーム画面のアプリ」とSafariは記録が別々です。問題を解く方にトークンを入れてください。</p>
       <details class="help"><summary>トークンの作り方</summary>
         <ol class="small">
           <li>github.com → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token</li>

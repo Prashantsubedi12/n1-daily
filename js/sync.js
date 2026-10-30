@@ -61,6 +61,11 @@ export function hasPending() {
   return pendingDates().length > 0;
 }
 
+// Answers recorded on this browser (iOS home-screen apps have storage separate from Safari).
+export function localCount() {
+  return getState().log.filter(e => !e.r).length;
+}
+
 async function putDay(date) {
   const st = getState();
   const { repo, branch } = cfg();
@@ -100,7 +105,8 @@ export async function syncNow() {
     st.sync.last = Date.now();
     st.sync.error = '';
     save();
-    return { ok: true, msg: dates.length ? `${dates.length}日分を同期しました` : '最新です' };
+    const mine = localCount();
+    return { ok: true, msg: dates.length ? `${dates.length}日分を同期しました（この端末の解答 ${mine}問）` : `最新です（この端末の解答 ${mine}問）` };
   } catch (e) {
     st.sync.error = e.message;
     save();
