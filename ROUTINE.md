@@ -7,7 +7,8 @@ Day 1 = 2026-10-29. Explanations: Japanese + one short English line (`en`).
 2. `node tools/analyze.mjs` → read the weakness report (accuracy by type, weak tags, recent mistakes with the wrong choice picked, reading speed).
 3. Write `data/daily/YYYY-MM-DD.json` (today, same schema as `data/daily/2026-10-29.json`):
    - `report`: 3–4 lines in Japanese. What went wrong yesterday (specific: which grammar point / which reading trap), today's focus, one concrete tip.
-   - `learn`: 5 new N1 grammar cards + 12 new vocab cards (never repeat an existing `point`/`w`). Days 31–38: no new cards, review only.
+   - `learn`: the 5 grammar points listed for today's day number in `data/curriculum.json` + 12 new vocab cards on that day's vocab theme (never repeat an existing `point`/`w`; grep `data/` first). Days 31–38: no new cards, review only.
+   - Card and question ids: `lg-NNN` / `lv-NNN` continue from the highest existing number; question ids are `dMMDD-NN`, passage ids `rd-<kind letter>NN` continuing the existing numbering.
    - `questions` (~35, all new, all original — never copy real JLPT items):
      - ~12 targeted at weak tags: new sentences on the same points, with the learner's actual wrong choice as a distractor.
      - ~10 on today's learn cards (tags must equal the card's `point` / `w` exactly).
