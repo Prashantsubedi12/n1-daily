@@ -7,7 +7,7 @@ const INTERVALS = [1, 2, 4, 7, 15, 30];
 
 export const EXAM_DATE = '2026-12-06';
 // Shown in 設定 so we can tell which code a phone is running. Bump together with VERSION in sw.js.
-export const APP_VERSION = 'v6';
+export const APP_VERSION = 'v7';
 
 function defaults() {
   return {

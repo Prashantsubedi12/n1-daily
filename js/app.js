@@ -285,8 +285,12 @@ async function boot() {
   }
   window.addEventListener('hashchange', route);
   route();
-  if (sync.configured() && sync.hasPending()) sync.syncNow();
-  window.addEventListener('online', () => sync.configured() && sync.syncNow());
+  const syncIfPending = () => sync.configured() && sync.hasPending() && sync.syncNow();
+  syncIfPending();
+  window.addEventListener('online', syncIfPending);
+  // iOS home-screen apps resume without reloading and may be killed while hidden:
+  // push answers both when the app is put away mid-round and when it comes back.
+  document.addEventListener('visibilitychange', syncIfPending);
 }
 
 boot();

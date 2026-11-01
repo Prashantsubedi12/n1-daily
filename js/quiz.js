@@ -36,8 +36,13 @@ export function hasSession() {
   return !!S;
 }
 
+// Every way out of a round (✕, bottom tabs, finishing) ends here, so answered questions always get synced.
 export function leaveQuiz() {
   if (!S) return;
+  if (S.results.length && !S.done) {
+    S.done = true;
+    S.onDone?.();
+  }
   clearInterval(S.timer);
   tts.stop();
   S = null;
@@ -239,7 +244,6 @@ function next() {
 
 function exitQuiz() {
   if (S) S.onProgress?.(Math.min(S.pos + (S.answered ? 1 : 0), S.base));
-  if (S && S.results.length && !S.done) S.onDone?.();
   leaveQuiz();
   location.hash = '#/';
 }
