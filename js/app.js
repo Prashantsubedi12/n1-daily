@@ -258,6 +258,15 @@ function viewLearn() {
 
 function registerSW() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    // A new deploy's worker takes over while this page still runs the old code.
+    // Reload once so the new code runs now (iOS home-screen apps rarely do a real reload).
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloaded || location.hash.startsWith('#/quiz')) return;
+      reloaded = true;
+      location.reload();
+    });
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('sw', err));
   }
 }
