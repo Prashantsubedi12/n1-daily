@@ -3,6 +3,7 @@
 import { DB } from './data.js';
 import { getState, srs, todayStr, addDays, isMastered } from './store.js';
 import { shuffle } from './util.js';
+import { estimateScores } from './estimate.js';
 
 export const TYPES = {
   kanji:       { label: '漢字読み',       mondai: '問題1', sec: 'lang' },
@@ -73,6 +74,11 @@ export function aggregate(days = 14) {
 }
 
 export const rate = a => (a && a.n ? a.c / a.n : null);
+
+// Estimated JLPT section scores from the last `days` days of answers (see estimate.js).
+export function estimate(days = 14) {
+  return estimateScores(getState().log, DB.q, addDays(todayStr(), -(days - 1)));
+}
 
 export function weakTags(agg, limit = 12) {
   return Object.entries(agg.tag)

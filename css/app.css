@@ -363,3 +363,20 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
 @media (min-width: 720px) {
   .wrap { padding-top: 28px; }
 }
+
+/* ---------- coach: estimated score, app updates, feedback ---------- */
+.coach .est-total b { font-size: 1.6em; line-height: 1; }
+.est-row { display: grid; grid-template-columns: 4.6em 1fr 2.2em; align-items: center; gap: 10px; margin: 8px 0; font-size: 0.92em; }
+.est-row .bar-track { margin: 0; }
+.est-num { text-align: right; font-variant-numeric: tabular-nums; }
+.card.news { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+.card.news .tag { background: var(--pri-soft); color: var(--pri); flex: none; }
+.form textarea {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; margin: 8px 0;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 16px; resize: vertical;
+}
+.fb-list { list-style: none; margin: 0; padding: 0; }
+.fb-list li { padding: 10px 0; }
+.fb-list li + li { border-top: 1px solid var(--line); }
+.report-q { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.linkish { background: none; border: 0; padding: 4px 0; color: var(--sub); font: inherit; font-size: 0.82em; cursor: pointer; text-decoration: underline; }

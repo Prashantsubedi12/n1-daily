@@ -1,0 +1,11 @@
+{
+  "note": "App updates shown in the app (意見・更新). Newest first. Written by the improver agent; see IMPROVER.md.",
+  "entries": [
+    {
+      "date": "2026-11-01",
+      "version": "v8",
+      "title": "推定スコアと「問題を報告」を追加",
+      "detail": "ホームに分野別の推定スコア（合格ライン19点・合計100点）を表示。解説の下の「⚑ この問題を報告」で、おかしな問題を1タップで知らせられます。意見はホームの「意見・更新」から。"
+    }
+  ]
+}

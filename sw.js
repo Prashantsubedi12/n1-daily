@@ -1,7 +1,7 @@
 // Offline support for studying on the train.
 // App shell: stale-while-revalidate. Question data: network first, cached copy when offline.
 
-const VERSION = 'n1daily-v7';
+const VERSION = 'n1daily-v8';
 const SHELL = [
   './',
   'index.html',
@@ -15,6 +15,7 @@ const SHELL = [
   'js/util.js',
   'js/speech.js',
   'js/sync.js',
+  'js/estimate.js',
   'manifest.webmanifest',
   'icons/icon.svg',
 ];

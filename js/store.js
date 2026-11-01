@@ -7,7 +7,7 @@ const INTERVALS = [1, 2, 4, 7, 15, 30];
 
 export const EXAM_DATE = '2026-12-06';
 // Shown in 設定 so we can tell which code a phone is running. Bump together with VERSION in sw.js.
-export const APP_VERSION = 'v7';
+export const APP_VERSION = 'v8';
 
 function defaults() {
   return {
@@ -26,7 +26,9 @@ function defaults() {
       ghBranch: 'progress',
       ghToken: '',
     },
-    log: [],      // {id, ok, ch, ms, t, d, rt?, lk?, pt?, r?}
+    log: [],      // {id, ok, ch, ms, t, d, rt?, lk?, pt?, pl?, r?}
+    events: [],   // {k, t, d, ...} — app opens, rounds started / ended (for the nightly analysis)
+    feedback: [], // {t, d, text, id?} — notes to the improver agent; id = reported question
     learned: {},  // learn-card id -> date
     plans: {},    // date -> menu key -> {ids, pos, rounds}
     sync: { shas: {}, counts: {}, last: 0, error: '' },
@@ -95,14 +97,28 @@ export function diffDays(from, to) {
 
 // ---- attempts ----
 
-export function recordAttempt({ id, ok, ch, ms, rt, pt }) {
+export function recordAttempt({ id, ok, ch, ms, rt, pt, pl }) {
   const e = { id, ok: ok ? 1 : 0, ch, ms: Math.round(ms), t: Date.now(), d: todayStr() };
   if (rt) e.rt = 1;
   if (pt) e.pt = Math.round(pt);
+  if (pl) e.pl = pl;
   state.log.push(e);
   edits++;
   save();
   return e;
+}
+
+export function logEvent(k, data = {}) {
+  state.events.push({ k, t: Date.now(), d: todayStr(), ...data });
+  save();
+}
+
+export function addFeedback(text, id) {
+  const f = { t: Date.now(), d: todayStr(), text };
+  if (id) f.id = id;
+  state.feedback.push(f);
+  save();
+  return f;
 }
 
 export function setLucky(t, lucky) {

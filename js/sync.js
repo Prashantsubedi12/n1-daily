@@ -1,7 +1,7 @@
 // Pushes this device's attempt log to the repo's `progress` branch (one file per day per device)
 // so the daily question generator can analyse it. Uses a fine-grained token the user pastes in 設定.
 
-import { getState, save, mergeLog } from './store.js';
+import { getState, save, mergeLog, APP_VERSION } from './store.js';
 
 const API = 'https://api.github.com';
 
@@ -72,11 +72,24 @@ export async function testConnection() {
   return 'OK：書き込みできます';
 }
 
+// Everything this device recorded on one day: answers, app events, feedback and 覚えた cards.
+function dayRecord(date) {
+  const st = getState();
+  return {
+    attempts: st.log.filter(e => e.d === date && !e.r).map(({ r, ...e }) => e),
+    events: st.events.filter(e => e.d === date),
+    feedback: st.feedback.filter(f => f.d === date),
+    learned: Object.keys(st.learned).filter(id => st.learned[id] === date),
+  };
+}
+
+const size = rec => rec.attempts.length + rec.events.length + rec.feedback.length + rec.learned.length;
+
 function pendingDates() {
   const st = getState();
-  const counts = {};
-  for (const e of st.log) if (!e.r) counts[e.d] = (counts[e.d] || 0) + 1;
-  return Object.keys(counts).filter(d => st.sync.counts[d] !== counts[d]).sort();
+  const dates = new Set([...st.log.filter(e => !e.r), ...st.events, ...st.feedback].map(e => e.d));
+  for (const d of Object.values(st.learned)) dates.add(d);
+  return [...dates].filter(d => st.sync.counts[d] !== size(dayRecord(d))).sort();
 }
 
 export function hasPending() {
@@ -92,13 +105,13 @@ async function putDay(date) {
   const st = getState();
   const { repo, branch } = cfg();
   const path = `progress/${date}_${st.deviceId}.json`;
-  const attempts = st.log.filter(e => e.d === date && !e.r).map(({ r, ...e }) => e);
-  const body = { device: st.deviceId, date, attempts };
+  const rec = dayRecord(date);
+  const body = { device: st.deviceId, date, app: APP_VERSION, ...rec };
   const content = b64encode(JSON.stringify(body));
   const put = sha =>
     gh(`/repos/${repo}/contents/${path}`, {
       method: 'PUT',
-      body: JSON.stringify({ message: `progress ${date} (${attempts.length})`, content, branch, ...(sha ? { sha } : {}) }),
+      body: JSON.stringify({ message: `progress ${date} (${rec.attempts.length})`, content, branch, ...(sha ? { sha } : {}) }),
     });
   let res = await put(st.sync.shas[date]);
   if (res.status === 409 || res.status === 422) {
@@ -110,7 +123,7 @@ async function putDay(date) {
   if (!res.ok) throw new Error(await explain(res));
   const json = await res.json();
   st.sync.shas[date] = json.content.sha;
-  st.sync.counts[date] = attempts.length;
+  st.sync.counts[date] = size(rec);
 }
 
 let running = false;
@@ -156,10 +169,10 @@ export async function restore() {
     const doc = JSON.parse(b64decode(meta.content));
     if (doc.device === st.deviceId) {
       st.sync.shas[doc.date] = meta.sha;
-      st.sync.counts[doc.date] = doc.attempts.length;
+      st.sync.counts[doc.date] = size({ attempts: [], events: [], feedback: [], learned: [], ...doc });
       continue;
     }
-    entries.push(...doc.attempts);
+    entries.push(...(doc.attempts || []));
   }
   return mergeLog(entries);
 }

@@ -1,13 +1,16 @@
-import { load, save, getState, todayStr, diffDays, EXAM_DATE } from './store.js';
+import { load, save, getState, todayStr, diffDays, addDays, EXAM_DATE, logEvent } from './store.js';
 import { DB, loadData, latestDaily, learnFor } from './data.js';
-import { buildRound, dueList, menuSizes, streak, aggregate, rate } from './engine.js';
+import { buildRound, dueList, menuSizes, streak, aggregate, rate, estimate } from './engine.js';
 import { startQuiz, renderQuiz, hasSession, leaveQuiz, quizKey } from './quiz.js';
-import { viewPractice, viewReview, viewStats, viewSettings } from './pages.js';
+import { viewPractice, viewReview, viewStats, viewSettings, viewFeedback } from './pages.js';
 import { $, $$, esc, fmt, toast, ago, pct } from './util.js';
+import { MIN_ANSWERS, PASS } from './estimate.js';
 import * as sync from './sync.js';
 import * as tts from './speech.js';
 
 const view = $('#view');
+
+const SECTION_SHORT = { lang: '言語知識', read: '読解', listen: '聴解' };
 
 const MENU = [
   { key: 'review', title: '復習', sub: '間違えた・まぐれの問題' },
@@ -25,6 +28,7 @@ const ROUTES = {
   review: () => viewReview(view, runRound),
   stats: () => viewStats(view, runRound),
   settings: () => viewSettings(view),
+  feedback: () => viewFeedback(view),
   quiz: () => renderQuiz(view),
 };
 
@@ -45,7 +49,8 @@ export function runRound(kind, arg, title) {
     toast('出題できる問題がありません');
     return;
   }
-  startQuiz({ ids, title, onDone: afterRound });
+  logEvent('start', { m: kind, n: ids.length });
+  startQuiz({ ids, title, onDone: info => afterRound(kind, info) });
 }
 
 function startMenu(key) {
@@ -63,6 +68,7 @@ function startMenu(key) {
     save();
   }
   const item = MENU.find(m => m.key === key);
+  logEvent('start', { m: key, n: p.ids.length - p.pos });
   startQuiz({
     ids: p.ids,
     start: p.pos,
@@ -71,11 +77,12 @@ function startMenu(key) {
       p.pos = pos;
       save();
     },
-    onDone: afterRound,
+    onDone: info => afterRound(key, info),
   });
 }
 
-function afterRound() {
+function afterRound(m, info) {
+  logEvent('end', { m, ...info });
   if (!sync.configured()) return;
   sync.syncNow().then(r => {
     if (!r.ok && r.msg !== 'オフライン' && r.msg !== '同期中') toast(r.msg);
@@ -97,6 +104,20 @@ function viewHome() {
   const learn = learnFor(today);
   const learnedToday = learn.cards.filter(c => st.learned[c.id]).length;
   const agg = aggregate(14);
+  const est = estimate();
+  const news = (DB.changelog || [])[0];
+  const freshNews = news && news.date >= addDays(today, -6);
+
+  const estRow = key => {
+    const sec = est.sections[key];
+    const w = sec.score == null ? 0 : Math.round((sec.score / 60) * 100);
+    const cls = sec.score == null ? '' : sec.score >= 30 ? 'good' : sec.score >= PASS.section ? 'mid' : 'low';
+    return `<div class="est-row">
+      <span class="est-name">${SECTION_SHORT[key]}</span>
+      <div class="bar-track"><i class="${cls}" style="width:${w}%"></i><span class="target" style="left:${(PASS.section / 60) * 100}%"></span></div>
+      <b class="est-num">${sec.score == null ? '—' : sec.score}</b>
+    </div>`;
+  };
 
   const status = key => {
     const p = plans[key];
@@ -153,6 +174,21 @@ function viewHome() {
     </ul>
   </section>
 
+  <section class="card coach">
+    <div class="row between">
+      <div class="card-label">推定スコア <span class="muted small">直近14日</span></div>
+      <div class="est-total">${est.total == null ? '<span class="small muted">データ不足</span>' : `<b>${est.total}</b><span class="small muted"> / 180</span>`}</div>
+    </div>
+    ${['lang', 'read', 'listen'].map(estRow).join('')}
+    <p class="small muted">${estNote(est)} 正答率からの概算です。</p>
+  </section>
+
+  ${
+    freshNews
+      ? `<a class="card news" href="#/feedback"><span class="tag">更新</span><span><b>${esc(news.title)}</b><span class="small muted">　${news.date.slice(5).replace('-', '/')}</span></span></a>`
+      : ''
+  }
+
   <section class="stat-row">
     <div class="stat"><b>${streak()}</b><span>連続日数</span></div>
     <div class="stat"><b>${due}</b><span>復習待ち</span></div>
@@ -165,10 +201,18 @@ function viewHome() {
         ? `同期：${st.sync.error ? `<span class="ng">${esc(st.sync.error)}</span>` : ago(st.sync.last)}`
         : `<a href="#/settings">GitHub同期を設定</a>すると、毎日の問題があなたの弱点に合わせて作られます`
     }
-    <a class="gear" href="#/settings" aria-label="設定">設定 ›</a>
+    <span><a class="gear" href="#/feedback">意見・更新</a>　<a class="gear" href="#/settings" aria-label="設定">設定 ›</a></span>
   </section>`;
 
   $$('[data-menu]', view).forEach(b => b.addEventListener('click', () => startMenu(b.dataset.menu)));
+}
+
+function estNote(est) {
+  if (est.total == null) return `各分野${MIN_ANSWERS}問以上解くと表示されます。`;
+  if (est.pass) return `合格ライン（合計${PASS.total}・各分野${PASS.section}）を超えています。このペースを保とう。`;
+  const low = Object.entries(est.sections).filter(([, s]) => s.score < PASS.section).map(([k]) => SECTION_SHORT[k]);
+  const gap = PASS.total - est.total;
+  return [gap > 0 ? `合格まであと<b>${gap}</b>点。` : '', low.length ? `${low.join('・')}が${PASS.section}点未満（足切り）。最優先で。` : ''].join('');
 }
 
 // ---------- learn ----------
@@ -256,6 +300,14 @@ function viewLearn() {
 
 // ---------- boot ----------
 
+// One 'open' event per 30 minutes of use, so the analysis can see days the app was opened but not studied.
+let lastOpen = 0;
+function noteOpen() {
+  if (Date.now() - lastOpen < 30 * 60 * 1000) return;
+  lastOpen = Date.now();
+  logEvent('open');
+}
+
 function registerSW() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // A new deploy's worker takes over while this page still runs the old code.
@@ -286,11 +338,15 @@ async function boot() {
   window.addEventListener('hashchange', route);
   route();
   const syncIfPending = () => sync.configured() && sync.hasPending() && sync.syncNow();
+  noteOpen();
   syncIfPending();
   window.addEventListener('online', syncIfPending);
   // iOS home-screen apps resume without reloading and may be killed while hidden:
   // push answers both when the app is put away mid-round and when it comes back.
-  document.addEventListener('visibilitychange', syncIfPending);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') noteOpen();
+    syncIfPending();
+  });
 }
 
 boot();

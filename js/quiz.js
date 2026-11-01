@@ -1,12 +1,14 @@
 // The question screen: one question at a time, instant feedback, missed 語彙/文法 items come back once at the end.
 
 import { DB } from './data.js';
-import { getState, recordAttempt, setLucky } from './store.js';
+import { getState, recordAttempt, setLucky, addFeedback } from './store.js';
 import { typeLabel } from './engine.js';
-import { $, $$, esc, fmt, paras, mmss, shuffle, plain } from './util.js';
+import { $, $$, esc, fmt, paras, mmss, shuffle, plain, toast } from './util.js';
 import * as tts from './speech.js';
 
 const RETRY_TYPES = new Set(['kanji', 'context', 'paraphrase', 'usage', 'grammar', 'order']);
+// One tap from the explanation; the nightly generator fixes reported questions.
+const REPORT_REASONS = ['正解が2つある', '正解がおかしい', '日本語が不自然', '解説がわかりにくい'];
 
 let S = null;
 
@@ -25,6 +27,7 @@ export function startQuiz({ ids, start = 0, title = '', retry = false, onProgres
     passageStart: {},
     lastEntry: null,
     played: false,
+    plays: 0,
     timer: null,
     done: false,
   };
@@ -36,12 +39,17 @@ export function hasSession() {
   return !!S;
 }
 
-// Every way out of a round (✕, bottom tabs, finishing) ends here, so answered questions always get synced.
+// How the round went, for the nightly analysis (fin = reached the result screen).
+function roundInfo(fin) {
+  return { fin: fin ? 1 : 0, a: S.results.length, c: S.results.filter(r => r.ok && !r.lucky).length, of: S.base };
+}
+
+// Every way out of a round (✕, back gesture, finishing) ends here, so answered questions always get synced.
 export function leaveQuiz() {
   if (!S) return;
   if (S.results.length && !S.done) {
     S.done = true;
-    S.onDone?.();
+    S.onDone?.(roundInfo(false));
   }
   clearInterval(S.timer);
   tts.stop();
@@ -72,6 +80,7 @@ export function renderQuiz(root) {
   S.order = q.fixed ? q.choices.map((_, i) => i) : shuffle(q.choices.map((_, i) => i));
   S.answered = false;
   S.played = false;
+  S.plays = 0;
   S.qStart = Date.now();
   const longChoices = q.type === 'usage' || q.choices.some(c => c.length > 14);
 
@@ -166,6 +175,7 @@ function playAudio(q, root) {
   btn.classList.add('playing');
   if (note) note.textContent = '再生中…';
   S.played = true;
+  if (!S.answered) S.plays++;
   const ok = tts.speak(tts.partsFor(q, S.order), () => {
     btn.classList.remove('playing');
     if (note) note.textContent = exam && !S.answered ? '再生終了（本番モード）' : 'もう一度聞くには ▶';
@@ -193,7 +203,7 @@ function answer(chosen, root) {
       clearInterval(S.timer);
     }
   }
-  const e = recordAttempt({ id: q.id, ok, ch: chosen, ms: Date.now() - S.qStart, rt: item.rt, pt });
+  const e = recordAttempt({ id: q.id, ok, ch: chosen, ms: Date.now() - S.qStart, rt: item.rt, pt, pl: S.plays });
   S.lastEntry = e;
   if (!item.rt) S.results.push({ id: q.id, ok, t: e.t, ch: chosen });
   if (!ok && !item.rt && RETRY_TYPES.has(q.type)) S.items.push({ id: q.id, rt: true });
@@ -217,7 +227,19 @@ function answer(chosen, root) {
       ${q.exp ? `<div class="exp">${fmt(q.exp)}</div>` : ''}
       ${q.en && showEn() ? `<div class="en">${esc(q.en)}</div>` : ''}
       ${q.type === 'listening' ? scriptHTML(q) : ''}
+      <div class="report-q" id="reportQ"><button class="linkish" data-act="report">⚑ この問題を報告</button></div>
     </div>`;
+  $('[data-act="report"]', root).addEventListener('click', () => {
+    const box = $('#reportQ', root);
+    box.innerHTML = REPORT_REASONS.map(r => `<button class="chip" data-reason="${esc(r)}">${esc(r)}</button>`).join('');
+    $$('[data-reason]', box).forEach(b =>
+      b.addEventListener('click', () => {
+        addFeedback(b.dataset.reason, q.id);
+        box.innerHTML = '<span class="small muted">報告しました。次の更新で直します。</span>';
+        toast('報告ありがとう');
+      }),
+    );
+  });
   const lucky = $('[data-act="lucky"]', root);
   if (lucky) {
     lucky.addEventListener('click', () => {
@@ -252,7 +274,7 @@ function renderSummary(root) {
   clearInterval(S.timer);
   if (!S.done) {
     S.done = true;
-    S.onDone?.();
+    S.onDone?.(roundInfo(true));
   }
   const res = S.results;
   const good = res.filter(r => r.ok && !r.lucky).length;
@@ -287,7 +309,7 @@ function renderSummary(root) {
     location.hash = '#/';
   });
   const redo = $('[data-act="redo"]', root);
-  if (redo) redo.addEventListener('click', () => startQuiz({ ids: wrong.map(r => r.id), title: '解き直し', retry: true }));
+  if (redo) redo.addEventListener('click', () => startQuiz({ ids: wrong.map(r => r.id), title: '解き直し', retry: true, onDone: S.onDone }));
   window.scrollTo(0, 0);
 }
 

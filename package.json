@@ -1,0 +1,14 @@
+{
+  "name": "n1-daily",
+  "private": true,
+  "type": "module",
+  "description": "Tooling only — the app itself has no build step and no runtime dependencies.",
+  "scripts": {
+    "validate": "node tools/validate.mjs",
+    "analyze": "node tools/analyze.mjs",
+    "smoke": "node tools/smoke.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.43.1"
+  }
+}

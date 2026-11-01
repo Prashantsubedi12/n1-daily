@@ -8,6 +8,7 @@ export const DB = {
   groups: {},     // passage id -> [question ids] in order
   learn: [],      // learn cards (grammar + vocab), each with .date
   daily: {},      // date -> {report, focus}
+  changelog: [],  // app updates by the improver agent, newest first
 };
 
 async function getJSON(url) {
@@ -44,6 +45,7 @@ export async function loadData() {
   for (const q of DB.list) {
     if (q.passage) (DB.groups[q.passage] ||= []).push(q.id);
   }
+  DB.changelog = await getJSON('data/changelog.json').then(c => c.entries || []).catch(() => []);
   return DB;
 }
 

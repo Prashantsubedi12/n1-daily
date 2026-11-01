@@ -1,5 +1,5 @@
 import { DB } from './data.js';
-import { getState, save, srs, isMastered, todayStr, addDays, diffDays, EXAM_DATE, APP_VERSION, replaceState } from './store.js';
+import { getState, save, srs, isMastered, todayStr, addDays, diffDays, EXAM_DATE, APP_VERSION, replaceState, addFeedback } from './store.js';
 import { TYPES, SUBS, SECTIONS, aggregate, rate, weakTags, wrongList, dueList, typeLabel, readingSpeed, secOf } from './engine.js';
 import { $, $$, esc, fmt, plain, pct, toast, ago, mmss } from './util.js';
 import * as sync from './sync.js';
@@ -343,8 +343,61 @@ export function viewSettings(view) {
   });
   $('#reset').addEventListener('click', () => {
     if (!confirm('この端末の学習記録をすべて消します。よろしいですか？')) return;
-    replaceState({ ...st, log: [], learned: {}, plans: {}, sync: { shas: {}, counts: {}, last: 0, error: '' } });
+    replaceState({ ...st, log: [], events: [], learned: {}, plans: {}, sync: { shas: {}, counts: {}, last: 0, error: '' } });
     toast('消去しました');
     location.hash = '#/';
+  });
+}
+
+// ---------- 意見・更新: notes to the improver agent + what it changed ----------
+
+export function viewFeedback(view) {
+  const st = getState();
+  const sent = [...st.feedback].reverse().slice(0, 8);
+  const news = (DB.changelog || []).slice(0, 10);
+
+  view.innerHTML = `
+    <h2 class="page-title">意見・更新</h2>
+
+    <section class="card form">
+      <div class="card-label">アプリへの意見</div>
+      <p class="small muted">使いにくい所・欲しい機能・おかしな所を書いてください。勉強した日の夜に改善エージェントが読んで、アプリを直します。問題の誤りは、解説の下の「⚑ この問題を報告」から。</p>
+      <textarea id="fbText" rows="4" maxlength="1000" placeholder="例：読解の本文が長くて、問題に戻るのが大変"></textarea>
+      <button class="btn primary wide" id="fbSend">送る</button>
+      <p class="small muted" id="fbStatus">※ GitHubの公開リポジトリに保存されます。個人情報は書かないでください。</p>
+    </section>
+
+    ${
+      sent.length
+        ? `<section class="card"><div class="card-label">送った意見</div><ul class="fb-list">${sent
+            .map(f => `<li><span class="small muted">${f.d.slice(5).replace('-', '/')}${f.id ? '・問題 ' + esc(f.id) : ''}</span><div>${esc(f.text)}</div></li>`)
+            .join('')}</ul></section>`
+        : ''
+    }
+
+    <section class="card">
+      <div class="card-label">最近の更新</div>
+      ${
+        news.length
+          ? `<ul class="fb-list">${news
+              .map(n => `<li><span class="small muted">${n.date.slice(5).replace('-', '/')}${n.version ? '・' + esc(n.version) : ''}</span><div><b>${esc(n.title)}</b></div>${n.detail ? `<div class="small">${esc(n.detail)}</div>` : ''}</li>`)
+              .join('')}</ul>`
+          : '<p class="small muted">まだありません。</p>'
+      }
+    </section>`;
+
+  $('#fbSend').addEventListener('click', async () => {
+    const text = $('#fbText').value.trim();
+    if (!text) return;
+    addFeedback(text);
+    $('#fbText').value = '';
+    const status = $('#fbStatus');
+    if (!sync.configured()) {
+      status.textContent = '保存しました。GitHub同期を設定すると届きます。';
+      return;
+    }
+    status.textContent = '送信中…';
+    const r = await sync.syncNow();
+    status.textContent = r.ok ? '届きました。ありがとう。' : `保存しました（送信は次回）：${r.msg}`;
   });
 }
