@@ -41,13 +41,32 @@ export function configured() {
   return !!(token && repo);
 }
 
+// Turns a failed GitHub response into a Japanese hint about which token setting is wrong.
+async function explain(res) {
+  let detail = '';
+  try {
+    detail = (await res.json()).message || '';
+  } catch {}
+  if (res.status === 401) return '認証エラー：トークンが無効か期限切れです。作り直してください';
+  // GitHub answers 403 or 404 both when the repo isn't selected and when Contents is read-only
+  if (res.status === 403 || res.status === 404)
+    return `書き込み不可（${res.status}）：トークンの Repository access で n1-daily を選び、Contents を「Read and write」にしてください`;
+  return `エラー ${res.status} ${detail}`;
+}
+
+// Public repos are readable with any token, so only a real write proves the token can sync.
 export async function testConnection() {
   const { repo, branch } = cfg();
-  const r = await gh(`/repos/${repo}/branches/${branch}`);
-  if (r.status === 401) return '認証エラー：トークンが無効です';
-  if (r.status === 404) return 'リポジトリかブランチが見つかりません（トークンの権限も確認）';
-  if (!r.ok) return `エラー ${r.status}`;
-  return 'OK';
+  const st = getState();
+  const path = `progress/.ping-${st.deviceId}`;
+  const cur = await gh(`/repos/${repo}/contents/${path}?ref=${branch}`);
+  const sha = cur.ok ? (await cur.json()).sha : undefined;
+  const r = await gh(`/repos/${repo}/contents/${path}`, {
+    method: 'PUT',
+    body: JSON.stringify({ message: 'sync test', content: b64encode(new Date().toISOString()), branch, ...(sha ? { sha } : {}) }),
+  });
+  if (!r.ok) return explain(r);
+  return 'OK：書き込みできます';
 }
 
 function pendingDates() {
@@ -85,7 +104,7 @@ async function putDay(date) {
     const sha = cur.ok ? (await cur.json()).sha : undefined;
     res = await put(sha);
   }
-  if (!res.ok) throw new Error(`同期エラー ${res.status}`);
+  if (!res.ok) throw new Error(await explain(res));
   const json = await res.json();
   st.sync.shas[date] = json.content.sha;
   st.sync.counts[date] = attempts.length;
@@ -108,9 +127,11 @@ export async function syncNow() {
     const mine = localCount();
     return { ok: true, msg: dates.length ? `${dates.length}日分を同期しました（この端末の解答 ${mine}問）` : `最新です（この端末の解答 ${mine}問）` };
   } catch (e) {
-    st.sync.error = e.message;
+    // fetch itself throws (iOS: "Load failed") when the request never reached GitHub
+    const msg = e instanceof TypeError ? `通信エラー：${e.message}` : e.message;
+    st.sync.error = msg;
     save();
-    return { ok: false, msg: e.message };
+    return { ok: false, msg };
   } finally {
     running = false;
   }
