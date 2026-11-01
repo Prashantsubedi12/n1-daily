@@ -41,6 +41,8 @@ export function configured() {
   return !!(token && repo);
 }
 
+const NOT_SET = 'トークンが空です：GitHubで作ったトークン（github_pat_…）を貼り付けてください';
+
 // Turns a failed GitHub response into a Japanese hint about which token setting is wrong.
 async function explain(res) {
   let detail = '';
@@ -56,6 +58,7 @@ async function explain(res) {
 
 // Public repos are readable with any token, so only a real write proves the token can sync.
 export async function testConnection() {
+  if (!configured()) return NOT_SET;
   const { repo, branch } = cfg();
   const st = getState();
   const path = `progress/.ping-${st.deviceId}`;
@@ -113,7 +116,7 @@ async function putDay(date) {
 let running = false;
 
 export async function syncNow() {
-  if (!configured()) return { ok: false, msg: '未設定' };
+  if (!configured()) return { ok: false, msg: NOT_SET };
   if (running) return { ok: false, msg: '同期中' };
   if (!navigator.onLine) return { ok: false, msg: 'オフライン' };
   running = true;
