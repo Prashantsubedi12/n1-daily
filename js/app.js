@@ -1,7 +1,9 @@
 import { load, save, getState, todayStr, diffDays, addDays, EXAM_DATE, logEvent } from './store.js';
 import { DB, loadData, latestDaily, learnFor } from './data.js';
 import { buildRound, dueList, menuSizes, streak, aggregate, rate, estimate } from './engine.js';
-import { startQuiz, renderQuiz, hasSession, leaveQuiz, quizKey } from './quiz.js';
+import { startQuiz, renderQuiz, hasSession, leaveQuiz, quizKey, questList } from './quiz.js';
+import { viewMatch, leaveMatch } from './match.js';
+import { progress, todayQuests, newBadges } from './game.js';
 import { viewPractice, viewReview, viewStats, viewSettings, viewFeedback } from './pages.js';
 import { $, $$, esc, fmt, toast, ago, pct } from './util.js';
 import { MIN_ANSWERS, PASS } from './estimate.js';
@@ -31,12 +33,14 @@ const ROUTES = {
   settings: () => viewSettings(view),
   feedback: () => viewFeedback(view),
   quiz: () => renderQuiz(view),
+  match: () => viewMatch(view),
 };
 
 function route() {
   const name = location.hash.replace(/^#\/?/, '');
   if (name !== 'quiz' && hasSession()) leaveQuiz();
-  document.body.classList.toggle('in-quiz', name === 'quiz');
+  if (name !== 'match') leaveMatch();
+  document.body.classList.toggle('in-quiz', name === 'quiz' || name === 'match');
   $$('#tabbar a').forEach(a => a.classList.toggle('active', a.dataset.tab === (name || 'home')));
   (ROUTES[name] || viewHome)();
   if (name !== 'quiz') window.scrollTo(0, 0);
@@ -109,7 +113,9 @@ function viewHome() {
   const news = (DB.changelog || [])[0];
   const freshNews = news && news.date >= addDays(today, -6);
   const goal = st.settings.daily;
-  const days = streak();
+  const g = progress();
+  const days = g.streak;
+  const quests = todayQuests();
   const hi = greeting({ hour: new Date().getHours(), todays: todays.length, goal, due, streak: days });
 
   const estRow = key => {
@@ -155,6 +161,13 @@ function viewHome() {
       <div class="goal-num"><b>${todays.length}</b><small>/${goal}</small></div>
       <div class="goal-cap">${days ? `🔥${days}日連続` : '今日の目標'}</div>
     </div>
+    <div class="lvl-row">
+      <span class="lvl">Lv.${g.level}</span>
+      <span class="small"><b>${esc(g.title)}</b></span>
+      <div class="bar-track"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div>
+      <span class="small muted">⚡${g.todayXp} XP 今日</span>
+      ${g.freezes ? `<span class="small" title="ストリーク・フリーズ：休んだ日も連続記録を守ります">🧊×${g.freezes}</span>` : ''}
+    </div>
   </section>
 
   ${
@@ -189,6 +202,15 @@ function viewHome() {
     </ul>
   </section>
 
+  <section class="card quests">
+    <div class="row between">
+      <div class="card-label">🎁 今日のクエスト</div>
+      <div class="small muted">${quests.filter(q => q.done).length}/3${quests.every(q => q.done) ? '・🧊ゲット' : '・全部で🧊フリーズ'}</div>
+    </div>
+    ${questList(quests, quests.map(q => q.done))}
+    <a class="btn wide match-btn" href="#/match">🧩 漢字マッチで遊ぶ</a>
+  </section>
+
   <section class="card coach">
     <div class="row between">
       <div class="card-label">🎯 推定スコア <span class="muted small">直近14日</span></div>
@@ -220,6 +242,11 @@ function viewHome() {
   </section>`;
 
   $$('[data-menu]', view).forEach(b => b.addEventListener('click', () => startMenu(b.dataset.menu)));
+  const fresh = newBadges();
+  if (fresh.length) {
+    confetti();
+    toast(`🏅 新しいバッジ：${fresh.map(b => b.icon + b.name).join('・')}`);
+  }
   // The day's report can be long; keep it to a few lines so 今日のメニュー stays near the top.
   const rep = $('#reportText', view);
   const more = $('#reportMore', view);
@@ -286,6 +313,7 @@ function viewLearn() {
   ${grammar.length ? `<h3 class="sec-title">文法 <span class="muted small">${grammar.length}</span></h3>${grammar.map(card).join('')}` : ''}
   ${vocab.length ? `<h3 class="sec-title">語彙 <span class="muted small">${vocab.length}</span></h3>${vocab.map(card).join('')}` : ''}
   ${quizCount ? `<button class="btn primary wide" id="learnQuiz">新出の確認問題を解く（${Math.min(quizCount, 12)}問）</button>` : ''}
+  <a class="btn wide" href="#/match">🧩 漢字マッチで読みを覚える</a>
   ${
     pastDates.length
       ? `<h3 class="sec-title">これまでの新出</h3>

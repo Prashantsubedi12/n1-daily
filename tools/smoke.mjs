@@ -79,14 +79,20 @@ const go = async hash => {
 };
 const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('n1daily.v1') || '{}'));
 
-// Answers the current question (first choice), opens the explanation, moves on. Returns false when the round is over.
+// Picks an answer: first choice, or for 文の組み立て taps every piece into the blanks.
+async function pickAnswer() {
+  if (await page.$('.choice:not([disabled])')) return tap('.choice:not([disabled])');
+  while (await page.$('.tile:not([disabled])')) await tap('.tile:not([disabled])');
+}
+
+// Answers the current question, opens the explanation, moves on. Returns false when the round is over.
 async function answerOne() {
-  const has = await page.$('.choice:not([disabled])');
+  const has = await page.$('.choice:not([disabled]), .tile:not([disabled])');
   if (!has) return false;
-  await tap('.choice:not([disabled])');
+  await pickAnswer();
   await page.waitForSelector('.fb');
   await tap('[data-act="next"]');
-  await page.waitForFunction(() => document.querySelector('.choice:not([disabled])') || document.querySelector('.summary'));
+  await page.waitForFunction(() => document.querySelector('.choice:not([disabled]), .tile:not([disabled])') || document.querySelector('.summary'));
   return true;
 }
 
@@ -94,7 +100,7 @@ async function startMenu(key) {
   await go('#/');
   await page.waitForSelector(`[data-menu="${key}"]`);
   await tap(`[data-menu="${key}"]`);
-  await page.waitForSelector('.choice', { timeout: 5000 });
+  await page.waitForSelector('.choice, .tile', { timeout: 5000 });
 }
 
 async function exitRound() {
@@ -109,17 +115,19 @@ const flow = [
     await page.waitForSelector('.coach');
     await page.waitForSelector('.buddy .momo');
     await page.waitForSelector('.buddy .ring');
+    await page.waitForSelector('.quests .quest-list li');
+    await page.waitForSelector('.buddy .lvl');
   }),
   step('語彙・文法: answer, report a question, leave mid-round', async () => {
     await startMenu('lang');
-    await tap('.choice');
+    await pickAnswer();
     await page.waitForSelector('.fb .momo');
     await page.waitForSelector('[data-act="report"]');
     await tap('[data-act="report"]');
     await page.waitForSelector('[data-reason]');
     await tap('[data-reason]');
     await tap('[data-act="next"]');
-    await page.waitForSelector('.choice:not([disabled])');
+    await page.waitForSelector('.choice:not([disabled]), .tile:not([disabled])');
     await answerOne();
     await exitRound();
     const st = await state();
@@ -131,6 +139,8 @@ const flow = [
     for (let i = 0; i < 80 && (await answerOne()); i++);
     await page.waitForSelector('.summary');
     await page.waitForSelector('.sum-hero .momo');
+    await page.waitForSelector('.summary .quest-list');
+    await page.waitForFunction(() => Number(document.querySelector('#xpCount')?.textContent.replace('+', '')) > 0);
     await tap('[data-act="home"]');
     await page.waitForSelector('.menu');
     const st = await state();
@@ -147,6 +157,30 @@ const flow = [
     await answerOne();
     await exitRound();
   }),
+  step('文の組み立て: pieces fill the blanks and ★ is graded', async () => {
+    await page.evaluate(() => (location.hash = '#/practice'));
+    await tap('[data-type="order"]');
+    await page.waitForSelector('.tile');
+    while (await page.$('.tile:not([disabled])')) await tap('.tile:not([disabled])');
+    await page.waitForSelector('.slot.star.correct, .slot.star.wrong');
+    await page.waitForSelector('.fb');
+    await exitRound();
+  }),
+  step('漢字マッチ: clear both boards', async () => {
+    await go('#/match');
+    for (let i = 0; i < 20 && !(await page.$('.match-done')); i++) {
+      const k = await page.$eval('.mtile.w:not([disabled])', b => b.dataset.k).catch(() => null);
+      if (!k) {
+        await new Promise(r => setTimeout(r, 300));
+        continue;
+      }
+      await tap(`.mtile.w[data-k="${k}"]`);
+      await tap(`.mtile.r[data-k="${k}"]`);
+    }
+    await page.waitForSelector('.match-done', { timeout: 5000 });
+    const st = await state();
+    if (!st.events?.some(e => e.k === 'match' && e.fin === 1)) throw new Error('match not logged');
+  }),
   step('今日の新出: cards render, 覚えた saves', async () => {
     await go('#/learn');
     const box = await page.$('[data-learn]');
@@ -156,6 +190,10 @@ const flow = [
       const st = await state();
       if (!Object.keys(st.learned || {}).length) throw new Error('覚えた not saved');
     }
+  }),
+  step('記録: level and badges render', async () => {
+    await go('#/stats');
+    await page.waitForSelector('.badges .badge.got');
   }),
   ...['practice', 'review', 'stats', 'settings'].map(r =>
     step(`#/${r} renders`, async () => {

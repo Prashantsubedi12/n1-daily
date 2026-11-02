@@ -6,6 +6,7 @@ import { typeLabel } from './engine.js';
 import { $, $$, esc, fmt, paras, mmss, shuffle, plain, toast } from './util.js';
 import * as tts from './speech.js';
 import { mascot, reaction, summaryLine, ring, sparkle, confetti } from './coach.js';
+import { progress, todayQuests, newBadges, sound, XP } from './game.js';
 
 const RETRY_TYPES = new Set(['kanji', 'context', 'paraphrase', 'usage', 'grammar', 'order']);
 // One tap from the explanation; the nightly generator fixes reported questions.
@@ -37,6 +38,8 @@ export function startQuiz({ ids, start = 0, title = '', retry = false, onProgres
     maxCombo: 0,
     wrongRun: 0,
     startedAt: Date.now(),
+    before: { ...progress(), quests: todayQuests().map(q => q.done) },
+    slots: [],
   };
   if (location.hash === '#/quiz') window.dispatchEvent(new HashChangeEvent('hashchange'));
   else location.hash = '#/quiz';
@@ -90,6 +93,8 @@ export function renderQuiz(root) {
   S.plays = 0;
   S.qStart = Date.now();
   const longChoices = q.type === 'usage' || q.choices.some(c => c.length > 14);
+  const order = q.type === 'order' && (q.q.match(/＿★＿|＿＿/g) || []).length === q.choices.length;
+  S.slots = order ? q.choices.map(() => null) : [];
 
   root.innerHTML = `
   <div class="quiz${getState().settings.mincho ? ' mincho' : ''}">
@@ -107,10 +112,15 @@ export function renderQuiz(root) {
     </div>
     ${p ? passageHTML(p) : ''}
     ${q.type === 'listening' ? listenHTML(q) : ''}
-    ${q.q ? `<div class="qtext" id="qtext">${fmt(q.q)}</div>` : ''}
-    <div class="choices${longChoices ? ' long' : ''}${hiddenChoices ? ' audio' : ''}">
+    ${q.q ? `<div class="qtext" id="qtext">${order ? orderText(q.q) : fmt(q.q)}</div>` : ''}
+    ${order ? '<p class="small muted order-hint">タップして正しい順に並べよう。★に入るものが答えです。</p>' : ''}
+    <div class="choices${order ? ' tiles' : longChoices ? ' long' : ''}${hiddenChoices ? ' audio' : ''}">
       ${S.order
-        .map((orig, i) => `<button class="choice" data-i="${orig}"><span class="num">${i + 1}</span><span class="ct">${hiddenChoices ? '' : fmt(q.choices[orig])}</span></button>`)
+        .map((orig, i) =>
+          order
+            ? `<button class="tile" data-i="${orig}">${fmt(q.choices[orig])}</button>`
+            : `<button class="choice" data-i="${orig}"><span class="num">${i + 1}</span><span class="ct">${hiddenChoices ? '' : fmt(q.choices[orig])}</span></button>`,
+        )
         .join('')}
     </div>
     <div id="feedback"></div>
@@ -120,6 +130,10 @@ export function renderQuiz(root) {
   </div>`;
 
   $$('.choice', root).forEach(b => b.addEventListener('click', () => answer(Number(b.dataset.i), root)));
+  if (order) {
+    $$('.tile', root).forEach(b => b.addEventListener('click', () => placeTile(b, q, root)));
+    $$('.slot', root).forEach(b => b.addEventListener('click', () => clearSlot(Number(b.dataset.s), root)));
+  }
   $('[data-act="exit"]', root).addEventListener('click', exitQuiz);
   $('[data-act="next"]', root).addEventListener('click', next);
   const play = $('[data-act="play"]', root);
@@ -139,6 +153,56 @@ export function renderQuiz(root) {
 
   if (p && !firstOfPassage) $('#qtext')?.scrollIntoView({ block: 'start' });
   else window.scrollTo(0, 0);
+}
+
+// 文の組み立て: the blanks become tap targets; pieces fill them left to right.
+function orderText(text) {
+  let k = 0;
+  return text
+    .split(/(＿★＿|＿＿)/)
+    .map(part => (part === '＿★＿' || part === '＿＿' ? `<button class="slot${part === '＿★＿' ? ' star' : ''}" data-s="${k++}"></button>` : fmt(part)))
+    .join('');
+}
+
+function placeTile(b, q, root) {
+  if (S.answered || b.disabled) return;
+  const k = S.slots.indexOf(null);
+  if (k < 0) return;
+  S.slots[k] = Number(b.dataset.i);
+  b.disabled = true;
+  b.classList.add('used');
+  const slot = $(`.slot[data-s="${k}"]`, root);
+  slot.innerHTML = fmt(q.choices[S.slots[k]]);
+  slot.classList.add('filled');
+  sound('tap');
+  if (!S.slots.includes(null)) {
+    const star = Number($('.slot.star', root).dataset.s);
+    setTimeout(() => answer(S.slots[star], root), 250);
+  }
+}
+
+function clearSlot(k, root) {
+  if (S.answered || S.slots[k] == null) return;
+  const tile = $(`.tile[data-i="${S.slots[k]}"]`, root);
+  tile.disabled = false;
+  tile.classList.remove('used');
+  S.slots[k] = null;
+  const slot = $(`.slot[data-s="${k}"]`, root);
+  slot.innerHTML = '';
+  slot.classList.remove('filled');
+}
+
+// "+10 XP" rising from where he tapped.
+function floatXp(el, n) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const t = document.createElement('span');
+  t.className = 'xp-pop';
+  t.textContent = `+${n} XP`;
+  t.style.left = `${r.left + r.width / 2}px`;
+  t.style.top = `${r.top}px`;
+  document.body.append(t);
+  setTimeout(() => t.remove(), 1000);
 }
 
 function passageHTML(p) {
@@ -231,6 +295,8 @@ function answer(chosen, root) {
     same,
     retrySoon: !ok && !item.rt && RETRY_TYPES.has(q.type),
   });
+  const gain = ok ? (item.rt ? XP.retryOk : XP.ok) + (S.combo % 5 === 0 ? XP.combo5 : 0) : XP.tried;
+  sound(!ok ? 'ng' : S.combo % 5 === 0 ? 'combo' : 'ok');
   const combo = $('#combo', root);
   combo.hidden = S.combo < 2;
   combo.textContent = `🔥${S.combo}`;
@@ -244,17 +310,20 @@ function answer(chosen, root) {
     if (i === q.answer) b.classList.add('correct');
     if (i === chosen && !ok) b.classList.add('wrong');
     if (i === chosen && ok) sparkle(b);
+    if (i === chosen) floatXp(b, gain);
     const ct = $('.ct', b);
     if (!ct.textContent) ct.innerHTML = fmt(q.choices[i]);
   });
+  const orderNote = S.slots.length ? markOrder(q, chosen, ok, root, gain) : '';
   $('.choices', root).classList.remove('audio');
   const pos = S.order.indexOf(q.answer) + 1;
   $('#feedback', root).innerHTML = `
     <div class="fb ${ok ? 'fb-ok' : 'fb-ng'}">
       <div class="fb-head">
-        <span class="fb-who">${mascot(say.mood)}<span class="fb-say"><b>${ok ? '○ 正解' : `× 不正解 — 正解は ${pos}`}</b><span>${esc(say.text)}</span></span></span>
+        <span class="fb-who">${mascot(say.mood)}<span class="fb-say"><b>${ok ? '○ 正解' : S.slots.length ? `× 不正解 — ★は「${esc(plain(q.choices[q.answer]))}」` : `× 不正解 — 正解は ${pos}`}</b><span>${esc(say.text)}</span></span></span>
         ${ok && !item.rt ? '<button class="chip" data-act="lucky" aria-pressed="false">まぐれだった</button>' : ''}
       </div>
+      ${orderNote}
       ${q.exp ? `<div class="exp">${fmt(q.exp)}</div>` : ''}
       ${q.en && showEn() ? `<div class="en">${esc(q.en)}</div>` : ''}
       ${q.type === 'listening' ? scriptHTML(q) : ''}
@@ -285,7 +354,22 @@ function answer(chosen, root) {
   const play = $('[data-act="play"]', root);
   if (play) play.disabled = false;
   $('#actions', root).hidden = false;
+  $('#actions', root).classList.add(ok ? 'ok' : 'ng');
   $('#feedback', root).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Marks the ★ slot and compares his whole order with the one in the explanation (正しい順：A／B／C／D).
+function markOrder(q, chosen, ok, root, gain) {
+  $$('.slot', root).forEach(s => (s.disabled = true));
+  $$('.tile', root).forEach(t => (t.disabled = true));
+  const star = $('.slot.star', root);
+  star.classList.add(ok ? 'correct' : 'wrong');
+  floatXp(star, gain);
+  const right = (q.exp || '').match(/正しい順[:：]\s*([^。]+)/)?.[1].split('／').map(x => x.trim());
+  const mine = S.slots.map(i => plain(q.choices[i]));
+  if (!right || right.length !== mine.length) return '';
+  const same = right.every((x, i) => x === mine[i]);
+  return `<div class="order-line small"><div>あなた：${esc(mine.join('／'))}</div>${same ? '<div class="ok">並べ方も完璧！</div>' : `<div>正しい順：${esc(right.join('／'))}</div>`}</div>`;
 }
 
 function next() {
@@ -317,6 +401,11 @@ function renderSummary(root) {
   const todayN = st.log.filter(e => e.d === todayStr() && !e.rt).length;
   const goalJustMet = todayN >= goal && todayN - res.length < goal;
   const mins = Math.max(1, Math.round((Date.now() - S.startedAt) / 60000));
+  const now = progress();
+  const gained = Math.max(0, now.xp - S.before.xp);
+  const levelUp = now.level > S.before.level;
+  const quests = todayQuests();
+  const fresh = newBadges();
   root.innerHTML = `
   <div class="summary">
     <div class="sum-hero">
@@ -327,11 +416,19 @@ function renderSummary(root) {
       <div class="big">${good}<small> / ${res.length}</small></div>
       <div>${S.title ? esc(S.title) + '　' : ''}正答率 ${rate}%</div>
     </div>
+    <div class="xp-gain"><b id="xpCount">+0</b> XP</div>
+    ${levelUp ? `<div class="levelup">⬆️ レベルアップ！ <b>Lv.${now.level}</b> ${esc(now.title)}</div>` : ''}
+    <div class="lvl-row"><span class="lvl">Lv.${now.level}</span><div class="bar-track"><i style="width:${Math.round((now.into / now.need) * 100)}%"></i></div><span class="small muted">${now.into}/${now.need}</span></div>
     <div class="sum-stats">
       <span>🔥 最大${S.maxCombo}連続</span>
       <span>⏱ ${mins}分</span>
       <span class="sum-goal">${ring(todayN, goal)}今日 ${todayN}/${goal}問</span>
     </div>
+    ${fresh.map(b => `<div class="badge-new"><span class="bicon">${b.icon}</span><span><b>新しいバッジ：${esc(b.name)}</b><span class="small muted">${esc(b.desc)}</span></span></div>`).join('')}
+    <section class="card quests">
+      <div class="card-label">🎁 今日のクエスト</div>
+      ${questList(quests, S.before.quests)}
+    </section>
     ${
       wrong.length
         ? `<h3>見直し（${wrong.length}）</h3>
@@ -357,7 +454,33 @@ function renderSummary(root) {
   const redo = $('[data-act="redo"]', root);
   if (redo) redo.addEventListener('click', () => startQuiz({ ids: wrong.map(r => r.id), title: '解き直し', retry: true, onDone: S.onDone }));
   window.scrollTo(0, 0);
-  if (goalJustMet || (rate >= 70 && res.length >= 3)) confetti();
+  const newQuest = quests.some((q, i) => q.done && !S.before.quests[i]);
+  if (goalJustMet || levelUp || newQuest || fresh.length || (rate >= 70 && res.length >= 3)) confetti();
+  sound(levelUp ? 'level' : 'done');
+  countUp($('#xpCount', root), gained);
+}
+
+export function questList(quests, before = []) {
+  return `<ul class="quest-list">${quests
+    .map(
+      (q, i) => `<li class="${q.done ? 'done' : ''}${q.done && !before[i] ? ' just' : ''}">
+        <span class="qicon">${q.done ? '✅' : q.icon}</span>
+        <span class="qbody"><span>${esc(q.text)}</span><span class="bar-track"><i style="width:${Math.round((q.have / q.need) * 100)}%"></i></span></span>
+        <span class="small muted">${q.done && !before[i] ? '達成！' : `${q.have}/${q.need}`}</span>
+      </li>`,
+    )
+    .join('')}</ul>`;
+}
+
+function countUp(el, n) {
+  if (!el) return;
+  const t0 = performance.now();
+  const step = t => {
+    const p = Math.min(1, (t - t0) / 900);
+    el.textContent = `+${Math.round(n * (1 - Math.pow(1 - p, 3)))}`;
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 export function quizKey(ev) {
@@ -365,7 +488,7 @@ export function quizKey(ev) {
   if (ev.target.closest('input, textarea, select')) return;
   const n = Number(ev.key);
   if (n >= 1 && n <= 4 && !S.answered) {
-    const btn = $$('.choice')[n - 1];
+    const btn = $$('.choice, .tile')[n - 1];
     if (btn) btn.click();
   } else if ((ev.key === 'Enter' || ev.key === ' ') && S.answered) {
     ev.preventDefault();

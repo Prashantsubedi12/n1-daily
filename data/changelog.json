@@ -2,6 +2,12 @@
   "note": "App updates shown in the app (意見・更新). Newest first. Written by the improver agent; see IMPROVER.md.",
   "entries": [
     {
+      "date": "2026-11-03",
+      "version": "v10",
+      "title": "XP・レベル・クエスト・漢字マッチ",
+      "detail": "正解するとXPがもらえてレベルアップ。毎日3つのクエスト（全部クリアで🧊ストリーク・フリーズ）、バッジ、効果音、文の組み立てはタップで並べる形式に。新しく🧩漢字マッチ：間違えた漢字の読みから出ます。"
+    },
+    {
       "date": "2026-11-02",
       "version": "v9",
       "title": "モモ先生が一緒に勉強してくれる",

@@ -94,3 +94,8 @@ Reported questions (`Reported questions`) are NOT yours — the nightly generato
   モモ先生 mascot (js/coach.js) reacting to every answer, 🔥 combo, answer animations, round-end celebration
   + confetti, goal ring and streak on ホーム, emoji menu icons, long 今日のポイント folded to 4 lines.
   Next: watch whether rounds per day and finished rounds go up; if not, the problem isn't the look.
+- 2026-11-03 v10 (built by hand; he asked for "more like Duolingo"): js/game.js — XP, levels, 3 daily quests,
+  streak freeze (earned by finishing all 3 quests, max 2), 19 badges, synthesized sound (設定 toggle); 文の組み立て
+  as tap-to-arrange tiles; js/match.js 漢字マッチ (logs 'match' events with mismatched ids). Deliberately NOT built:
+  hearts (they cap practice), leagues (single user), push reminders (needs a server). Everything is derived from
+  log/events, so don't add stored XP fields. If he plays 漢字マッチ but 漢字読み accuracy doesn't rise, say so.

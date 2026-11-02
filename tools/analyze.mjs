@@ -339,6 +339,11 @@ lines.push(`- answers by hour: ${Object.entries(hours).map(([h, n]) => `${h}時 
 lines.push(`- opened the app but answered nothing: ${openedNotStudied.join(', ') || 'never'}`);
 lines.push(`- listening accuracy by plays: once ${rate(byPlays.once)} · replayed ${rate(byPlays.more)}`);
 lines.push(`- 覚えた cards checked: ${behavior.cardsLearnedLast7}`);
+// 漢字マッチ (v10): games cleared and the kanji/vocab ids he paired wrongly — readings that still don't stick.
+const matches = recentEvents.filter(e => e.k === 'match' && e.fin);
+const matchMissed = {};
+for (const e of matches) for (const id of e.ids || []) matchMissed[id] = (matchMissed[id] || 0) + 1;
+lines.push(`- 漢字マッチ cleared: ${matches.length}${matches.length ? ` (avg ${Math.round(matches.reduce((n, e) => n + (e.miss || 0), 0) / matches.length)} misses)` : ''}${Object.keys(matchMissed).length ? ` · mismatched: ${Object.entries(matchMissed).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${id}×${n}`).join(', ')}` : ''}`);
 lines.push('', '## Correct but slow (not automatic yet)');
 for (const x of slowCorrect) lines.push(`- ${x.id} [${x.type}] ${x.tags?.join('/')} ${x.seconds}s`);
 if (!slowCorrect.length) lines.push('none');

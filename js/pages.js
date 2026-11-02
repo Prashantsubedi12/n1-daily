@@ -4,6 +4,7 @@ import { TYPES, SUBS, SECTIONS, aggregate, rate, weakTags, wrongList, dueList, t
 import { $, $$, esc, fmt, plain, pct, toast, ago, mmss } from './util.js';
 import * as sync from './sync.js';
 import * as tts from './speech.js';
+import { progress, badges, XP } from './game.js';
 
 // ---------- 練習: by question type ----------
 
@@ -128,6 +129,8 @@ export function viewStats(view, runRound) {
   const speed = readingSpeed(14);
   const weak = weakTags(agg, 15);
   const studied = Object.keys(all.day).length;
+  const g = progress();
+  const bs = badges();
 
   const secBar = key => {
     const a = agg.sec[key];
@@ -157,6 +160,15 @@ export function viewStats(view, runRound) {
 
   view.innerHTML = `
     <h2 class="page-title">記録</h2>
+    <section class="card lvl-card">
+      <div class="row between"><div class="card-label">⚡ レベル</div><span class="small muted">合計 ${g.xp} XP・最長 ${g.best}日連続${g.freezes ? `・🧊×${g.freezes}` : ''}</span></div>
+      <div class="lvl-row"><span class="lvl">Lv.${g.level}</span><span class="small"><b>${esc(g.title)}</b></span><div class="bar-track"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div><span class="small muted">${g.into}/${g.need}</span></div>
+      <p class="small muted">正解 +${XP.ok}・5連続 +${XP.combo5}・ラウンド完走 +${XP.round}・全問正解 +${XP.perfect}・クエスト +${XP.quest}・マッチ +${XP.match}</p>
+    </section>
+    <section class="card">
+      <div class="card-label">🏅 バッジ <span class="muted small">${bs.filter(b => b.got).length}/${bs.length}</span></div>
+      <div class="badges">${bs.map(b => `<div class="badge${b.got ? ' got' : ''}" title="${esc(b.desc)}"><span class="bicon">${b.got ? b.icon : '🔒'}</span><b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
+    </section>
     <section class="stat-row">
       <div class="stat"><b>${diffDays(today, EXAM_DATE)}</b><span>本番まで</span></div>
       <div class="stat"><b>${studied}</b><span>学習日数</span></div>
@@ -217,6 +229,7 @@ export function viewSettings(view) {
       <label class="switch"><input type="checkbox" id="showEn"${s.showEn ? ' checked' : ''}><span>解説に英語の補足を表示</span></label>
       <label class="switch"><input type="checkbox" id="mincho"${s.mincho ? ' checked' : ''}><span>問題文を明朝体で表示（本番と同じ）</span></label>
       <label class="switch"><input type="checkbox" id="big"${s.big ? ' checked' : ''}><span>文字を大きく</span></label>
+      <label class="switch"><input type="checkbox" id="sound"${s.sound ? ' checked' : ''}><span>効果音（正解・不正解・クリアの音）</span></label>
     </section>
 
     <section class="card form">
@@ -269,6 +282,7 @@ export function viewSettings(view) {
   };
   $('#daily').addEventListener('change', e => set('daily', Number(e.target.value)));
   $('#showEn').addEventListener('change', e => set('showEn', e.target.checked));
+  $('#sound').addEventListener('change', e => set('sound', e.target.checked));
   $('#mincho').addEventListener('change', e => set('mincho', e.target.checked));
   $('#big').addEventListener('change', e => {
     set('big', e.target.checked);
