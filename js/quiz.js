@@ -1,14 +1,17 @@
 // The question screen: one question at a time, instant feedback, missed 語彙/文法 items come back once at the end.
 
 import { DB } from './data.js';
-import { getState, recordAttempt, setLucky, addFeedback } from './store.js';
+import { getState, recordAttempt, setLucky, addFeedback, todayStr } from './store.js';
 import { typeLabel } from './engine.js';
 import { $, $$, esc, fmt, paras, mmss, shuffle, plain, toast } from './util.js';
 import * as tts from './speech.js';
+import { mascot, reaction, summaryLine, ring, sparkle, confetti } from './coach.js';
 
 const RETRY_TYPES = new Set(['kanji', 'context', 'paraphrase', 'usage', 'grammar', 'order']);
 // One tap from the explanation; the nightly generator fixes reported questions.
 const REPORT_REASONS = ['正解が2つある', '正解がおかしい', '日本語が不自然', '解説がわかりにくい'];
+// A correct 語彙/文法 answer slower than this gets a "speed up" nudge instead of praise.
+const SLOW_MS = 35000;
 
 let S = null;
 
@@ -30,6 +33,10 @@ export function startQuiz({ ids, start = 0, title = '', retry = false, onProgres
     plays: 0,
     timer: null,
     done: false,
+    combo: 0,
+    maxCombo: 0,
+    wrongRun: 0,
+    startedAt: Date.now(),
   };
   if (location.hash === '#/quiz') window.dispatchEvent(new HashChangeEvent('hashchange'));
   else location.hash = '#/quiz';
@@ -90,6 +97,7 @@ export function renderQuiz(root) {
       <button class="icon-btn" data-act="exit" aria-label="中断してホームへ">✕</button>
       <div class="qprog" aria-hidden="true"><i style="width:${(S.pos / n) * 100}%"></i></div>
       ${p ? '<span class="ptimer" id="ptimer"></span>' : ''}
+      <span class="combo" id="combo"${S.combo >= 2 ? '' : ' hidden'}>🔥${S.combo}</span>
       <span class="qcount">${S.pos + 1} / ${n}</span>
     </div>
     <div class="qmeta">
@@ -203,16 +211,39 @@ function answer(chosen, root) {
       clearInterval(S.timer);
     }
   }
-  const e = recordAttempt({ id: q.id, ok, ch: chosen, ms: Date.now() - S.qStart, rt: item.rt, pt, pl: S.plays });
+  const ms = Date.now() - S.qStart;
+  const same = !ok && getState().log.some(x => x.id === q.id && !x.ok && x.ch === chosen);
+  const e = recordAttempt({ id: q.id, ok, ch: chosen, ms, rt: item.rt, pt, pl: S.plays });
   S.lastEntry = e;
   if (!item.rt) S.results.push({ id: q.id, ok, t: e.t, ch: chosen });
   if (!ok && !item.rt && RETRY_TYPES.has(q.type)) S.items.push({ id: q.id, rt: true });
+  const lostCombo = ok ? 0 : S.combo;
+  S.combo = ok ? S.combo + 1 : 0;
+  S.maxCombo = Math.max(S.maxCombo, S.combo);
+  S.wrongRun = ok ? 0 : S.wrongRun + 1;
+  const say = reaction({
+    ok,
+    rt: item.rt,
+    combo: S.combo,
+    lostCombo,
+    wrongRun: S.wrongRun,
+    slow: ok && !item.rt && RETRY_TYPES.has(q.type) && ms > SLOW_MS,
+    same,
+    retrySoon: !ok && !item.rt && RETRY_TYPES.has(q.type),
+  });
+  const combo = $('#combo', root);
+  combo.hidden = S.combo < 2;
+  combo.textContent = `🔥${S.combo}`;
+  combo.classList.remove('pop');
+  void combo.offsetWidth; // restart the pop animation
+  combo.classList.add('pop');
 
   $$('.choice', root).forEach(b => {
     const i = Number(b.dataset.i);
     b.disabled = true;
     if (i === q.answer) b.classList.add('correct');
     if (i === chosen && !ok) b.classList.add('wrong');
+    if (i === chosen && ok) sparkle(b);
     const ct = $('.ct', b);
     if (!ct.textContent) ct.innerHTML = fmt(q.choices[i]);
   });
@@ -221,7 +252,7 @@ function answer(chosen, root) {
   $('#feedback', root).innerHTML = `
     <div class="fb ${ok ? 'fb-ok' : 'fb-ng'}">
       <div class="fb-head">
-        <span>${ok ? '○ 正解' : `× 不正解 — 正解は ${pos}`}</span>
+        <span class="fb-who">${mascot(say.mood)}<span class="fb-say"><b>${ok ? '○ 正解' : `× 不正解 — 正解は ${pos}`}</b><span>${esc(say.text)}</span></span></span>
         ${ok && !item.rt ? '<button class="chip" data-act="lucky" aria-pressed="false">まぐれだった</button>' : ''}
       </div>
       ${q.exp ? `<div class="exp">${fmt(q.exp)}</div>` : ''}
@@ -280,11 +311,26 @@ function renderSummary(root) {
   const good = res.filter(r => r.ok && !r.lucky).length;
   const wrong = res.filter(r => !r.ok || r.lucky);
   const rate = res.length ? Math.round((good / res.length) * 100) : 0;
+  const say = summaryLine(rate);
+  const st = getState();
+  const goal = st.settings.daily;
+  const todayN = st.log.filter(e => e.d === todayStr() && !e.rt).length;
+  const goalJustMet = todayN >= goal && todayN - res.length < goal;
+  const mins = Math.max(1, Math.round((Date.now() - S.startedAt) / 60000));
   root.innerHTML = `
   <div class="summary">
+    <div class="sum-hero">
+      ${mascot(say.mood, 'lg')}
+      <div class="bubble">${esc(goalJustMet ? `今日の目標${goal}問を達成🎉 ${say.text}` : say.text)}</div>
+    </div>
     <div class="sum-score ${rate >= 70 ? 'good' : rate >= 50 ? 'mid' : 'low'}">
       <div class="big">${good}<small> / ${res.length}</small></div>
       <div>${S.title ? esc(S.title) + '　' : ''}正答率 ${rate}%</div>
+    </div>
+    <div class="sum-stats">
+      <span>🔥 最大${S.maxCombo}連続</span>
+      <span>⏱ ${mins}分</span>
+      <span class="sum-goal">${ring(todayN, goal)}今日 ${todayN}/${goal}問</span>
     </div>
     ${
       wrong.length
@@ -297,7 +343,7 @@ function renderSummary(root) {
                  <div class="wl-a">正解：${fmt(q.choices[q.answer])}</div></li>`;
              })
              .join('')}</ul>`
-        : '<p class="center muted">全問正解。この調子。</p>'
+        : '<p class="center muted">全問正解。見直しはなし！</p>'
     }
     <div class="sum-actions">
       ${wrong.length ? '<button class="btn" data-act="redo">間違えた問題を解き直す</button>' : ''}
@@ -311,6 +357,7 @@ function renderSummary(root) {
   const redo = $('[data-act="redo"]', root);
   if (redo) redo.addEventListener('click', () => startQuiz({ ids: wrong.map(r => r.id), title: '解き直し', retry: true, onDone: S.onDone }));
   window.scrollTo(0, 0);
+  if (goalJustMet || (rate >= 70 && res.length >= 3)) confetti();
 }
 
 export function quizKey(ev) {

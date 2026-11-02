@@ -90,3 +90,7 @@ Reported questions (`Reported questions`) are NOT yours — the nightly generato
 
 - 2026-11-01 v8 (built by hand, not the agent): events/feedback sync, estimated score card, ⚑ question
   report, 意見・更新 page, changelog, tools/smoke.mjs, analyze.mjs behaviour + gate.
+- 2026-11-02 v9 (built by hand from his 11-02 note "feels like talking to a machine… enjoyable and interactive"):
+  モモ先生 mascot (js/coach.js) reacting to every answer, 🔥 combo, answer animations, round-end celebration
+  + confetti, goal ring and streak on ホーム, emoji menu icons, long 今日のポイント folded to 4 lines.
+  Next: watch whether rounds per day and finished rounds go up; if not, the problem isn't the look.

@@ -380,3 +380,73 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
 .fb-list li + li { border-top: 1px solid var(--line); }
 .report-q { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .linkish { background: none; border: 0; padding: 4px 0; color: var(--sub); font: inherit; font-size: 0.82em; cursor: pointer; text-decoration: underline; }
+
+/* ---------- モモ先生, combo, celebrations (js/coach.js) ---------- */
+.momo { flex: none; display: block; overflow: visible; transform-origin: 50% 90%; }
+.momo.sm { width: 44px; height: 44px; }
+.momo.md { width: 62px; height: 62px; }
+.momo.lg { width: 112px; height: 112px; }
+.momo.float { animation: momo-float 3.2s ease-in-out infinite; }
+.momo.happy:not(.float) { animation: momo-hop 0.6s ease-out; }
+.momo.wow:not(.float) { animation: momo-hop 0.5s ease-out 2; }
+.momo.oops:not(.float) { animation: momo-wobble 0.55s ease-in-out; }
+@keyframes momo-float { 50% { transform: translateY(-4px); } }
+@keyframes momo-hop { 35% { transform: translateY(-7px) scale(1.04, 0.96); } 65% { transform: translateY(0) scale(0.97, 1.03); } }
+@keyframes momo-wobble { 25% { transform: rotate(-7deg); } 60% { transform: rotate(5deg); } }
+
+.bubble { position: relative; background: var(--pri-soft); color: var(--ink); border-radius: 14px; padding: 8px 12px; font-size: 0.88em; line-height: 1.55; }
+.bubble::before { content: ""; position: absolute; border: 6px solid transparent; }
+.buddy { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 12px 14px; }
+.buddy .bubble::before { left: -6px; top: 50%; margin-top: -6px; border-left: 0; border-right-color: var(--pri-soft); }
+
+.goal { position: relative; width: 64px; display: flex; flex-direction: column; align-items: center; }
+.ring { display: block; width: 64px; height: 64px; }
+.ring circle { fill: none; stroke-width: 7; }
+.ring-bg { stroke: var(--line); }
+.ring-fg { stroke: var(--pri); stroke-linecap: round; }
+.ring.full .ring-fg { stroke: var(--ok); }
+.ring.empty .ring-fg { display: none; }
+.goal-num { position: absolute; top: 0; left: 0; width: 64px; height: 64px; display: flex; align-items: baseline; justify-content: center; padding-top: 22px; line-height: 1; }
+.goal-num b { font-size: 1.05em; }
+.goal-num small { font-size: 0.62em; color: var(--sub); }
+.goal-cap { font-size: 0.66em; font-weight: 700; color: var(--sub); white-space: nowrap; margin-top: 2px; }
+
+.mi-icon { font-size: 1.15em; position: relative; }
+.menu-item.done .mi-icon::after {
+  content: "✓"; position: absolute; right: -5px; bottom: -5px; width: 17px; height: 17px; border-radius: 50%;
+  background: var(--ok); color: #fff; font-size: 10px; font-weight: 800; display: grid; place-items: center;
+}
+
+.combo { font-size: 0.85em; font-weight: 800; color: var(--star); white-space: nowrap; }
+.combo.pop { animation: combo-pop 0.4s ease-out; }
+@keyframes combo-pop { 40% { transform: scale(1.5); } }
+.choice { transition: border-color 0.15s, background 0.15s, transform 0.1s; }
+.choice:not(:disabled):active { transform: scale(0.97); }
+.choice.correct { animation: choice-pop 0.35s ease-out; }
+.choice.wrong { animation: choice-shake 0.4s ease-in-out; }
+@keyframes choice-pop { 50% { transform: scale(1.04); } }
+@keyframes choice-shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.fb-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.fb-say { display: flex; flex-direction: column; line-height: 1.45; }
+.fb-say > span { font-weight: 400; font-size: 0.88em; color: var(--ink); }
+
+.sum-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 8px; }
+.sum-hero .bubble { text-align: center; max-width: 320px; }
+.sum-hero .bubble::before { top: -6px; left: 50%; margin-left: -6px; border-top: 0; border-bottom-color: var(--pri-soft); }
+.summary .sum-score { padding: 12px 0 8px; }
+.sum-stats { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; font-size: 0.85em; }
+.sum-stats > span { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+.sum-goal .ring { width: 20px; height: 20px; }
+.sum-goal .ring circle { stroke-width: 10; }
+
+.sparks { position: fixed; z-index: 30; width: 0; height: 0; pointer-events: none; }
+.sparks i { position: absolute; width: 7px; height: 7px; margin: -3.5px; border-radius: 50%; animation: spark 0.7s ease-out forwards; }
+@keyframes spark { to { transform: translate(var(--x), var(--y)) scale(0.3); opacity: 0; } }
+.confetti { position: fixed; inset: 0; z-index: 30; overflow: hidden; pointer-events: none; }
+.confetti i { position: absolute; top: -14px; width: 8px; height: 13px; border-radius: 2px; animation-name: confetti-fall; animation-timing-function: cubic-bezier(0.25, 0.6, 0.5, 1); animation-fill-mode: forwards; }
+@keyframes confetti-fall { to { transform: translate(var(--dx), 108vh) rotate(var(--r)); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .momo, .combo.pop, .choice.correct, .choice.wrong { animation: none !important; }
+}
+.report-text.clamp { max-height: 7em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }

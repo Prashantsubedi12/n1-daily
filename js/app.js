@@ -7,16 +7,17 @@ import { $, $$, esc, fmt, toast, ago, pct } from './util.js';
 import { MIN_ANSWERS, PASS } from './estimate.js';
 import * as sync from './sync.js';
 import * as tts from './speech.js';
+import { mascot, greeting, ring, sparkle, confetti } from './coach.js';
 
 const view = $('#view');
 
 const SECTION_SHORT = { lang: '言語知識', read: '読解', listen: '聴解' };
 
 const MENU = [
-  { key: 'review', title: '復習', sub: '間違えた・まぐれの問題' },
-  { key: 'lang', title: '語彙・文法', sub: '問題1〜6（弱点を優先）' },
-  { key: 'read', title: '読解', sub: '短文〜長文・時間を計る' },
-  { key: 'listen', title: '聴解', sub: '音声読み上げ' },
+  { key: 'review', title: '復習', sub: '間違えた・まぐれの問題', icon: '🔁' },
+  { key: 'lang', title: '語彙・文法', sub: '問題1〜6（弱点を優先）', icon: '📝' },
+  { key: 'read', title: '読解', sub: '短文〜長文・時間を計る', icon: '📖' },
+  { key: 'listen', title: '聴解', sub: '音声読み上げ', icon: '🎧' },
 ];
 
 // ---------- routing ----------
@@ -107,6 +108,9 @@ function viewHome() {
   const est = estimate();
   const news = (DB.changelog || [])[0];
   const freshNews = news && news.date >= addDays(today, -6);
+  const goal = st.settings.daily;
+  const days = streak();
+  const hi = greeting({ hour: new Date().getHours(), todays: todays.length, goal, due, streak: days });
 
   const estRow = key => {
     const sec = est.sections[key];
@@ -143,30 +147,41 @@ function viewHome() {
     </div>
   </section>
 
+  <section class="card buddy">
+    ${mascot(hi.mood, 'md float')}
+    <div class="bubble">${esc(hi.text)}</div>
+    <div class="goal" title="今日の目標 ${goal}問">
+      ${ring(todays.length, goal)}
+      <div class="goal-num"><b>${todays.length}</b><small>/${goal}</small></div>
+      <div class="goal-cap">${days ? `🔥${days}日連続` : '今日の目標'}</div>
+    </div>
+  </section>
+
   ${
     daily?.report
       ? `<section class="card report">
-          <div class="card-label">今日のポイント${daily.date !== today ? `（${daily.date.slice(5).replace('-', '/')}）` : ''}</div>
-          <div class="report-text">${fmt(daily.report)}</div>
+          <div class="card-label">💡 今日のポイント${daily.date !== today ? `（${daily.date.slice(5).replace('-', '/')}）` : ''}</div>
+          <div class="report-text clamp" id="reportText">${fmt(daily.report)}</div>
+          <button class="linkish" id="reportMore" hidden>続きを読む ▾</button>
         </section>`
       : ''
   }
 
   <section class="card">
     <div class="row between">
-      <div class="card-label">今日のメニュー</div>
+      <div class="card-label">📚 今日のメニュー</div>
       <div class="small muted">${todays.length}問 解答・正答 ${todays.length ? Math.round((todayGood / todays.length) * 100) : 0}%</div>
     </div>
     <ul class="menu">
       <li><a class="menu-item${learn.cards.length && learnedToday >= learn.cards.length ? ' done' : ''}" href="#/learn">
-        <span class="mi-icon">新</span>
+        <span class="mi-icon">✨</span>
         <span class="mi-body"><b>今日の新出</b><span class="small muted">文法・語彙カード${learn.cards.length ? `（${learn.cards.length}枚）` : ''}</span></span>
         <span class="mi-stat">${learn.cards.length ? (learnedToday >= learn.cards.length ? '✓ 完了' : `${learnedToday} / ${learn.cards.length}`) : '—'}</span>
       </a></li>
-      ${MENU.map((m, i) => {
+      ${MENU.map(m => {
         const s = status(m.key);
         return `<li><button class="menu-item ${s.cls}" data-menu="${m.key}">
-          <span class="mi-icon">${i + 1}</span>
+          <span class="mi-icon">${m.icon}</span>
           <span class="mi-body"><b>${m.title}</b><span class="small muted">${m.sub}</span></span>
           <span class="mi-stat">${s.text}${s.more ? '<small>もう1セット ›</small>' : ''}</span>
         </button></li>`;
@@ -176,7 +191,7 @@ function viewHome() {
 
   <section class="card coach">
     <div class="row between">
-      <div class="card-label">推定スコア <span class="muted small">直近14日</span></div>
+      <div class="card-label">🎯 推定スコア <span class="muted small">直近14日</span></div>
       <div class="est-total">${est.total == null ? '<span class="small muted">データ不足</span>' : `<b>${est.total}</b><span class="small muted"> / 180</span>`}</div>
     </div>
     ${['lang', 'read', 'listen'].map(estRow).join('')}
@@ -190,9 +205,9 @@ function viewHome() {
   }
 
   <section class="stat-row">
-    <div class="stat"><b>${streak()}</b><span>連続日数</span></div>
-    <div class="stat"><b>${due}</b><span>復習待ち</span></div>
-    <div class="stat"><b>${pct(rate(agg.sec.read))}</b><span>読解 正答率</span></div>
+    <div class="stat"><b>${days}</b><span>🔥 連続日数</span></div>
+    <div class="stat"><b>${due}</b><span>🔁 復習待ち</span></div>
+    <div class="stat"><b>${pct(rate(agg.sec.read))}</b><span>📖 読解 正答率</span></div>
   </section>
 
   <section class="sync-line small muted">
@@ -205,6 +220,16 @@ function viewHome() {
   </section>`;
 
   $$('[data-menu]', view).forEach(b => b.addEventListener('click', () => startMenu(b.dataset.menu)));
+  // The day's report can be long; keep it to a few lines so 今日のメニュー stays near the top.
+  const rep = $('#reportText', view);
+  const more = $('#reportMore', view);
+  if (rep && rep.scrollHeight > rep.clientHeight + 4) {
+    more.hidden = false;
+    more.addEventListener('click', () => {
+      const open = rep.classList.toggle('clamp') === false;
+      more.textContent = open ? '閉じる ▴' : '続きを読む ▾';
+    });
+  }
 }
 
 function estNote(est) {
@@ -280,6 +305,12 @@ function viewLearn() {
       else delete st.learned[cb.dataset.learn];
       cb.closest('.lcard').classList.toggle('learned', cb.checked);
       save();
+      if (!cb.checked) return;
+      sparkle(cb);
+      if (cards.every(c => st.learned[c.id])) {
+        confetti();
+        toast('今日の新出コンプリート🎉');
+      }
     }),
   );
   $$('[data-say]', view).forEach(b =>

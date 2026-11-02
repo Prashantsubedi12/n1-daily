@@ -2,6 +2,12 @@
   "note": "App updates shown in the app (意見・更新). Newest first. Written by the improver agent; see IMPROVER.md.",
   "entries": [
     {
+      "date": "2026-11-02",
+      "version": "v9",
+      "title": "モモ先生が一緒に勉強してくれる",
+      "detail": "答えるたびにモモ先生が反応します。連続正解は🔥コンボ、ラウンドの最後はお祝い。ホームに今日の目標リングと連続日数も追加しました。「機械と話しているみたい」という意見から作りました。"
+    },
+    {
       "date": "2026-11-01",
       "version": "v8",
       "title": "推定スコアと「問題を報告」を追加",

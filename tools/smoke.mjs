@@ -103,14 +103,17 @@ async function exitRound() {
 }
 
 const flow = [
-  step('home loads with menu and score card', async () => {
+  step('home loads with coach, goal ring, menu and score card', async () => {
     await page.goto(base + '#/', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.menu-item');
     await page.waitForSelector('.coach');
+    await page.waitForSelector('.buddy .momo');
+    await page.waitForSelector('.buddy .ring');
   }),
   step('語彙・文法: answer, report a question, leave mid-round', async () => {
     await startMenu('lang');
     await tap('.choice');
+    await page.waitForSelector('.fb .momo');
     await page.waitForSelector('[data-act="report"]');
     await tap('[data-act="report"]');
     await page.waitForSelector('[data-reason]');
@@ -127,6 +130,7 @@ const flow = [
     await startMenu('lang');
     for (let i = 0; i < 80 && (await answerOne()); i++);
     await page.waitForSelector('.summary');
+    await page.waitForSelector('.sum-hero .momo');
     await tap('[data-act="home"]');
     await page.waitForSelector('.menu');
     const st = await state();
