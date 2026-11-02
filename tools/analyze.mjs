@@ -7,7 +7,7 @@
 //   node tools/analyze.mjs                 # reads progress files from origin/progress
 //   node tools/analyze.mjs --dir path/     # or from a local folder of progress JSON files
 //   node tools/analyze.mjs --json          # machine-readable output
-//   node tools/analyze.mjs --gate FILE     # improver: has the learner finished a round since FILE's mark?
+//   node tools/analyze.mjs --gate FILE     # improver: has the learner finished a round or sent a note since FILE's mark?
 //   node tools/analyze.mjs --mark FILE     # improver: record that everything up to now has been handled
 
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
@@ -83,8 +83,9 @@ if (gateFile || markFile) {
   const finishedRounds = events.filter(e => e.k === 'end' && e.fin === 1 && e.t > last);
   const newAttempts = attempts.filter(a => a.t > last).length;
   const newNotes = feedback.filter(f => f.t > last);
+  // A note in 意見・更新 is him asking for a change, so it counts even without a finished round.
   // Phones still on an app without events (before v8) can only be judged by answer count.
-  const active = finishedRounds.length > 0 || (!events.length && newAttempts >= 10);
+  const active = finishedRounds.length > 0 || newNotes.length > 0 || (!events.length && newAttempts >= 10);
   console.log(JSON.stringify({ active, since: last ? new Date(last).toISOString() : null, finishedRounds: finishedRounds.length, newAttempts, newFeedback: newNotes }, null, 2));
   process.exit(0);
 }
@@ -331,7 +332,8 @@ for (const n of notes) lines.push(`- ${n.date}: ${n.text}`);
 if (!notes.length) lines.push('none');
 lines.push('', '## How the app is used (last 7 days)');
 lines.push(`- app versions seen: ${appVersions.join(', ') || 'unknown (before v8)'}`);
-for (const [m, r] of Object.entries(rounds)) lines.push(`- ${m}: started ${r.started}, finished ${r.finished}, quit ${r.quit}${r.quit ? ` (avg ${Math.round(r.answeredWhenQuit / r.quit)} answered before quitting)` : ''}`);
+// A start with no end means he closed or locked the phone mid-round (or backed out before answering).
+for (const [m, r] of Object.entries(rounds)) lines.push(`- ${m}: started ${r.started}, finished ${r.finished}, quit ${r.quit}${r.quit ? ` (avg ${Math.round(r.answeredWhenQuit / r.quit)} answered before quitting)` : ''}, left without an end ${Math.max(0, r.started - r.finished - r.quit)}`);
 lines.push(`- minutes per day: ${Object.entries(minutesPerDay).map(([d, m]) => `${d.slice(5)} ${m}`).join(' · ') || '—'}`);
 lines.push(`- answers by hour: ${Object.entries(hours).map(([h, n]) => `${h}時 ${n}`).join(' · ') || '—'}`);
 lines.push(`- opened the app but answered nothing: ${openedNotStudied.join(', ') || 'never'}`);

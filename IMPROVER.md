@@ -12,6 +12,7 @@ git pull --rebase origin main && git fetch origin progress
 node tools/analyze.mjs --gate tools/.improver-state.json
 ```
 
+`active` is true when he finished a round or wrote a note in 意見・更新 since your last mark.
 If `active` is `false`: stop. No edits, no commits. Report "no new study since <since> — nothing to do".
 He asked for exactly this: if he does nothing, the app does not change.
 
