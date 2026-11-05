@@ -66,6 +66,7 @@ await mobileViewport(390);
 
 const origin = new URL(base).origin;
 let testingOffline = false;
+const optionalContent = url => /\/data\/(?:daily\/|changelog\.json$)/.test(url || '');
 page.on('pageerror', e => problems.push(`page error: ${e.message}`));
 page.on('dialog', async dialog => {
   if (dialog.type() === 'confirm' && dialog.message().startsWith('途中のラウンドがあります。')) return dialog.accept();
@@ -73,11 +74,11 @@ page.on('dialog', async dialog => {
   await dialog.dismiss();
 });
 page.on('console', m => {
-  if (testingOffline && m.text().includes('503') && m.location().url?.includes('/data/daily/')) return;
+  if (testingOffline && m.text().includes('503') && optionalContent(m.location().url)) return;
   if (m.type() === 'error') problems.push(`console error: ${m.text()}`);
 });
 page.on('response', r => {
-  if (testingOffline && r.status() === 503 && new URL(r.url()).pathname.includes('/data/daily/')) return;
+  if (testingOffline && r.status() === 503 && optionalContent(new URL(r.url()).pathname)) return;
   if (r.url().startsWith(origin) && r.status() >= 400) problems.push(`HTTP ${r.status()} ${r.url().replace(origin, '')}`);
 });
 
@@ -354,15 +355,21 @@ const flow = [
   ...(!urlArg ? [step('offline: reload an installed shell with playable bank content', async () => {
     await page.waitForFunction(() => document.querySelector('#offlineReady')?.textContent.includes('オフライン'), { timeout: 20000 });
     testingOffline = true;
-    await page.setOfflineMode(true);
+    // Stop the origin itself so navigation, modules and worker fetches all lose the network.
+    await new Promise((resolve, reject) => {
+      server.close(err => err ? reject(err) : resolve());
+      server.closeAllConnections();
+    });
     try {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForSelector('.menu');
       await startMenu('read');
       await page.waitForSelector('.passage');
       await exitRound();
+    } catch (err) {
+      const visible = await page.evaluate(() => document.querySelector('main')?.innerText || document.body?.innerText).catch(() => '');
+      throw new Error(`${err.message.split('\n')[0]} at ${page.url()} (${visible?.trim().slice(0, 160) || 'empty page'})`);
     } finally {
-      await page.setOfflineMode(false);
       testingOffline = false;
     }
   })] : []),

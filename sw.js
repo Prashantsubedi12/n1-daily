@@ -1,7 +1,7 @@
 // Keep the app shell on one release until its replacement is ready to activate.
 const SCOPE = self.registration.scope;
 const PREFIX = 'n1daily:' + SCOPE + ':';
-const VERSION = PREFIX + 'v12';
+const VERSION = PREFIX + 'v13';
 const SHELL = [
   './',
   'index.html',
@@ -190,7 +190,7 @@ async function serveData(path, request) {
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET' || !req.url.startsWith(SCOPE)) return;
-  const path = req.url.slice(SCOPE.length).split('?')[0];
+  const path = req.url.slice(SCOPE.length).split(/[?#]/, 1)[0];
   const dataPath = path.startsWith('data/') ? path.slice(5) : '';
 
   if (dataPath === 'index.json' || dataPath === 'changelog.json' ||

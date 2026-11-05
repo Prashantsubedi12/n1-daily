@@ -98,6 +98,8 @@ test('verified first install works offline on a subpath and waits for an explici
 
   answers.clear();
   assert.equal(await (await sw.fetch('./')).text(), 'shell ' + scope);
+  assert.equal(await (await sw.fetch('#/quiz')).text(), 'shell ' + scope);
+  assert.equal(await (await sw.fetch('index.html?source=home#/review')).text(), 'shell ' + scope + 'index.html');
   assert.deepEqual(await (await sw.fetch('data/index.json')).json(),
     index('2000-02-01', ['bank/kanji.json'], [date]));
   assert.deepEqual(await (await sw.fetch('data/bank/kanji.json')).json(), bank);
