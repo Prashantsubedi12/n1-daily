@@ -1,9 +1,8 @@
 // Game layer: XP, levels, daily quests, streak freezes, badges and sound effects.
-// Everything except sound and "badges already shown" is derived from the synced log and events,
-// so a restore from GitHub or a second device rebuilds the same XP, quests and streak.
+// XP, quests and streaks are rebuilt from progress records and goal snapshots.
 
 import { DB } from './data.js';
-import { getState, todayStr, addDays } from './store.js';
+import { getState, getStateRevision, goalFor, todayStr, addDays } from './store.js';
 import { secOf } from './engine.js';
 
 export const XP = { ok: 10, retryOk: 5, tried: 1, combo5: 5, round: 15, perfect: 15, match: 10, quest: 20 };
@@ -14,6 +13,7 @@ const SEEN_KEY = 'n1daily.seen';
 
 let cache = null;
 let cacheKey = '';
+let cachedQuestions;
 
 function hash(str) {
   let h = 0;
@@ -27,23 +27,29 @@ function blankDay() {
 
 function compute() {
   const st = getState();
-  const key = `${st.log.length}:${st.events.length}:${Object.keys(st.learned).length}:${st.settings.daily}:${todayStr()}`;
-  if (cache && cacheKey === key) return cache;
+  const key = `${getStateRevision()}:${DB.list.length}:${todayStr()}`;
+  if (cache && cacheKey === key && cachedQuestions === DB.q) return cache;
   const days = {};
   const day = d => (days[d] ||= blankDay());
   let total = { answers: 0, kanjiOk: 0, read: 0, listen: 0 };
 
+  const roundCombos = new Map();
   for (const e of [...st.log].sort((a, b) => a.t - b.t)) {
     const s = day(e.d);
     const q = DB.q[e.id];
-    if (e.ok) {
-      s.xp += e.rt ? XP.retryOk : XP.ok;
-      s.combo++;
-      if (s.combo % 5 === 0) s.xp += XP.combo5;
-      s.maxCombo = Math.max(s.maxCombo, s.combo);
+    s.xp += e.ok ? (e.rt ? XP.retryOk : XP.ok) : XP.tried;
+    if (e.roundId) {
+      if (!e.rt && !e.assisted) {
+        const combo = e.ok && !e.lk ? (roundCombos.get(e.roundId) || 0) + 1 : 0;
+        roundCombos.set(e.roundId, combo);
+        if (combo && combo % 5 === 0) s.xp += XP.combo5;
+        s.maxCombo = Math.max(s.maxCombo, combo);
+      }
     } else {
-      s.xp += XP.tried;
-      s.combo = 0;
+      // Existing records predate round IDs and used a per-day combo.
+      s.combo = e.ok ? s.combo + 1 : 0;
+      if (s.combo && s.combo % 5 === 0) s.xp += XP.combo5;
+      s.maxCombo = Math.max(s.maxCombo, s.combo);
     }
     if (e.rt) continue;
     s.answers++;
@@ -100,6 +106,7 @@ function compute() {
   const xp = Object.values(days).reduce((n, s) => n + s.xp, 0);
   cache = { days, xp, streak, best, freezes, frozen, total };
   cacheKey = key;
+  cachedQuestions = DB.q;
   return cache;
 }
 
@@ -120,7 +127,7 @@ const FUN = [
 
 // The same three quests for a date on every device: the daily goal, one weak-area quest, one fun one.
 function questsFor(date, s) {
-  const goal = getState().settings.daily || 50;
+  const goal = goalFor(date);
   const h = hash(date);
   const list = [{ id: 'goal', icon: '🎯', text: `今日${goal}問解く`, need: goal, val: x => x.answers }, FOCUS[h % FOCUS.length], FUN[(h >> 3) % FUN.length]];
   return list.map(q => {
@@ -182,7 +189,7 @@ const BADGES = [
 ];
 const anyDay = (c, f) => Object.values(c.days).some(f);
 const sum = (c, f) => Object.values(c.days).reduce((n, s) => n + f(s), 0);
-const goalDays = c => Object.values(c.days).filter(s => s.answers >= (getState().settings.daily || 50)).length;
+const goalDays = c => Object.entries(c.days).filter(([date, s]) => s.answers >= goalFor(date)).length;
 
 export function badges() {
   const c = compute();

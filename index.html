@@ -17,7 +17,8 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <main id="view" class="wrap"><p class="muted center loading">読み込み中…</p></main>
+  <p id="persistenceStatus" class="persistence-status" role="alert" hidden></p>
+  <main id="view" class="wrap" tabindex="-1"><p class="muted center loading" role="status">読み込み中…</p></main>
 
   <nav id="tabbar" class="tabbar" aria-label="メニュー">
     <a href="#/" data-tab="home">

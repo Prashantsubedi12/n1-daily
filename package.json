@@ -6,6 +6,8 @@
   "scripts": {
     "validate": "node tools/validate.mjs",
     "analyze": "node tools/analyze.mjs",
+    "freshness": "node tools/freshness.mjs",
+    "test": "node --test",
     "smoke": "node tools/smoke.mjs"
   },
   "devDependencies": {

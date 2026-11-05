@@ -6,7 +6,7 @@
 //   node tools/smoke.mjs                         # serves this folder locally and tests it
 //   node tools/smoke.mjs --url https://prashantsubedi12.github.io/n1-daily/   # tests the live site
 //
-// Uses a fresh browser profile with no GitHub token, so it never writes to the progress branch.
+// Uses an isolated browser profile and synthetic study activity.
 
 import { createServer } from 'node:http';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
@@ -58,11 +58,19 @@ const page = await browser.newPage();
 await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
 
 const origin = new URL(base).origin;
+let testingOffline = false;
 page.on('pageerror', e => problems.push(`page error: ${e.message}`));
+page.on('dialog', async dialog => {
+  if (dialog.type() === 'confirm' && dialog.message().startsWith('途中のラウンドがあります。')) return dialog.accept();
+  problems.push(`unexpected dialog: ${dialog.message()}`);
+  await dialog.dismiss();
+});
 page.on('console', m => {
+  if (testingOffline && m.text().includes('503') && m.location().url?.includes('/data/daily/')) return;
   if (m.type() === 'error') problems.push(`console error: ${m.text()}`);
 });
 page.on('response', r => {
+  if (testingOffline && r.status() === 503 && new URL(r.url()).pathname.includes('/data/daily/')) return;
   if (r.url().startsWith(origin) && r.status() >= 400) problems.push(`HTTP ${r.status()} ${r.url().replace(origin, '')}`);
 });
 
@@ -83,6 +91,7 @@ const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('n1daily
 async function pickAnswer() {
   if (await page.$('.choice:not([disabled])')) return tap('.choice:not([disabled])');
   while (await page.$('.tile:not([disabled])')) await tap('.tile:not([disabled])');
+  await tap('[data-act="submit-order"]:not([disabled])');
 }
 
 // Answers the current question, opens the explanation, moves on. Returns false when the round is over.
@@ -117,6 +126,37 @@ const flow = [
     await page.waitForSelector('.buddy .ring');
     await page.waitForSelector('.quests .quest-list li');
     await page.waitForSelector('.buddy .lvl');
+    for (const width of [320, 390, 430]) {
+      await page.setViewport({ width, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      const layout = await page.evaluate(() => ({
+        overflow: document.documentElement.scrollWidth > innerWidth,
+        buttonHeight: document.querySelector('#priorityStart').getBoundingClientRect().height,
+        current: document.querySelector('#tabbar a[aria-current="page"]')?.textContent.trim(),
+      }));
+      if (layout.overflow || layout.buttonHeight < 44 || layout.current !== 'ホーム') throw new Error(`home layout at ${width}px`);
+    }
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  }),
+  step('priority drill: reveal evidence, reload feedback, then complete once', async () => {
+    await tap('#priorityStart');
+    await page.waitForSelector('.passage');
+    const order = await page.$$eval('.choice', buttons => buttons.map(b => b.dataset.i));
+    await pickAnswer();
+    await tap('.reading-evidence summary');
+    await page.waitForSelector('.reading-evidence[open] blockquote');
+    await page.waitForSelector('.reading-distractor');
+    const answered = await state();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.fb');
+    const restoredOrder = await page.$$eval('.choice', buttons => buttons.map(b => b.dataset.i));
+    if (restoredOrder.join() !== order.join() || (await state()).log.length !== answered.log.length) throw new Error('reload lost quiz state');
+    await tap('[data-act="next"]');
+    await page.waitForSelector('.summary');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.summary');
+    if ((await state()).events.filter(e => e.k === 'end' && e.m === 'priority').length !== 1) throw new Error('priority completion was not recorded exactly once');
+    await tap('[data-act="home"]');
+    await page.waitForFunction(() => document.querySelector('.priority')?.textContent.includes('クリアしました'));
   }),
   step('語彙・文法: answer, report a question, leave mid-round', async () => {
     await startMenu('lang');
@@ -132,7 +172,7 @@ const flow = [
     await exitRound();
     const st = await state();
     if (st.feedback?.length !== 1 || !st.feedback[0].id) throw new Error('question report was not saved');
-    if (!st.events?.some(e => e.k === 'end' && e.fin === 0)) throw new Error('abandoned round not logged');
+    if (!st.activeQuiz || st.events.some(e => e.k === 'end' && e.m === 'lang')) throw new Error('suspended round was not retained');
   }),
   step('語彙・文法: resume and finish to the result screen', async () => {
     await startMenu('lang');
@@ -154,7 +194,12 @@ const flow = [
   }),
   step('聴解: listening round renders and answers', async () => {
     await startMenu('listen');
+    await page.evaluate(() => { speechSynthesis.getVoices = () => []; });
+    await tap('[data-act="play"]');
+    await tap('[data-act="transcript"]');
+    await page.waitForSelector('.listen .script[open]');
     await answerOne();
+    if (!(await state()).log.at(-1)?.assisted) throw new Error('transcript answer was not marked as assisted');
     await exitRound();
   }),
   step('文の組み立て: pieces fill the blanks and ★ is graded', async () => {
@@ -162,6 +207,13 @@ const flow = [
     await tap('[data-type="order"]');
     await page.waitForSelector('.tile');
     while (await page.$('.tile:not([disabled])')) await tap('.tile:not([disabled])');
+    const submit = '[data-act="submit-order"]:not([disabled])';
+    await page.waitForSelector(submit);
+    if (await page.$('.fb')) throw new Error('order was graded before confirmation');
+    await tap('.slot[data-s="0"]');
+    if (await page.$(submit)) throw new Error('undo did not empty the slot');
+    await tap('.tile:not([disabled])');
+    await tap(submit);
     await page.waitForSelector('.slot.star.correct, .slot.star.wrong');
     await page.waitForSelector('.fb');
     await exitRound();
@@ -201,7 +253,7 @@ const flow = [
       await page.waitForSelector('.page-title');
     }),
   ),
-  step('意見・更新: send feedback without a token', async () => {
+  step('意見・更新: save feedback on this device', async () => {
     await go('#/feedback');
     await page.type('#fbText', 'smoke test');
     await tap('#fbSend');
@@ -214,6 +266,21 @@ const flow = [
     if (!(st.log?.length >= 3)) throw new Error(`only ${st.log?.length || 0} answers recorded`);
     if (!st.events?.some(e => e.k === 'open')) throw new Error('app open not logged');
   }),
+  ...(!urlArg ? [step('offline: reload an installed shell with playable bank content', async () => {
+    await page.waitForFunction(() => document.querySelector('#offlineReady')?.textContent.includes('オフライン'), { timeout: 20000 });
+    testingOffline = true;
+    await page.setOfflineMode(true);
+    try {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.menu');
+      await startMenu('read');
+      await page.waitForSelector('.passage');
+      await exitRound();
+    } finally {
+      await page.setOfflineMode(false);
+      testingOffline = false;
+    }
+  })] : []),
 ];
 
 for (const s of flow) await s();

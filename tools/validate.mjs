@@ -5,6 +5,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isBankPath, isContentDate } from '../js/data.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'data');
@@ -24,7 +25,9 @@ const str = v => typeof v === 'string' && v.trim().length > 0;
 
 function readJSON(path) {
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    const value = JSON.parse(readFileSync(path, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected an object');
+    return value;
   } catch (e) {
     err(path.replace(ROOT + '/', ''), `invalid JSON — ${e.message}`);
     return null;
@@ -36,9 +39,20 @@ if (!index) {
   console.error(errors.join('\n'));
   process.exit(1);
 }
-if (!str(index.exam) || !str(index.start)) err('index.json', 'needs "exam" and "start" dates');
+if (!isContentDate(index.exam) || !isContentDate(index.start) || index.exam < index.start)
+  err('index.json', 'needs valid start and exam dates in order');
+if (index.version !== 1) err('index.json', 'unsupported index version');
+if (!Array.isArray(index.bank) || !index.bank.length || !index.bank.every(isBankPath))
+  err('index.json', 'bank must list valid bank/*.json paths');
+if (!Array.isArray(index.daily) || !index.daily.every(isContentDate))
+  err('index.json', 'daily must list valid YYYY-MM-DD dates');
+if (errors.length) {
+  console.error(errors.join('\n'));
+  process.exit(1);
+}
+if (new Set(index.bank).size !== index.bank.length) err('index.json', 'duplicate bank files');
 
-const files = [...(index.bank || []), ...(index.daily || []).map(d => `daily/${d}.json`)];
+const files = [...index.bank, ...index.daily.map(d => `daily/${d}.json`)];
 
 // Every file on disk must be listed, or the app will never load it.
 for (const dir of ['bank', 'daily']) {
@@ -48,17 +62,17 @@ for (const dir of ['bank', 'daily']) {
     if (!files.includes(`${dir}/${f}`)) err(`data/${dir}/${f}`, 'exists but is not listed in index.json');
   }
 }
-const dailies = index.daily || [];
+const dailies = index.daily;
 if (new Set(dailies).size !== dailies.length) err('index.json', 'duplicate daily dates');
 if ([...dailies].sort().join() !== dailies.join()) warn('index.json', 'daily dates are not in order');
 
 const qIds = new Set();
 const pIds = new Set();
 const cardIds = new Set();
-const passageUse = {};
+const passageUse = Object.create(null);
 const counts = {};
 const allQuestions = [];
-const allPassages = {};
+const allPassages = Object.create(null);
 
 for (const f of files) {
   const path = join(DATA, f);
@@ -76,7 +90,25 @@ for (const f of files) {
     if (!str(doc.report)) warn(where, 'no report text');
   }
 
+  if (!Array.isArray(doc.questions) || !doc.questions.length) {
+    err(where, 'needs a nonempty questions array');
+    continue;
+  }
+  if (doc.passages !== undefined && !Array.isArray(doc.passages)) {
+    err(where, 'passages must be an array');
+    continue;
+  }
+  if (doc.learn !== undefined && (!doc.learn || typeof doc.learn !== 'object' || Array.isArray(doc.learn) ||
+      ['grammar', 'vocab'].some(kind => doc.learn[kind] !== undefined && !Array.isArray(doc.learn[kind])))) {
+    err(where, 'learn must contain grammar and vocab arrays when present');
+    continue;
+  }
+
   for (const p of doc.passages || []) {
+    if (!p || typeof p !== 'object') {
+      err(where, 'invalid passage entry');
+      continue;
+    }
     const w = `${where} passage ${p.id}`;
     if (!str(p.id)) err(w, 'missing id');
     else if (pIds.has(p.id)) err(w, 'duplicate passage id');
@@ -84,10 +116,14 @@ for (const f of files) {
     allPassages[p.id] = p;
     if (!PASSAGE_KINDS.includes(p.kind)) err(w, `bad kind "${p.kind}"`);
     if (!str(p.text)) err(w, 'empty text');
-    if (typeof p.target !== 'number' || p.target <= 0) err(w, 'target (seconds) must be a positive number');
+    if (!Number.isFinite(p.target) || p.target <= 0) err(w, 'target (seconds) must be a positive number');
   }
 
-  for (const q of doc.questions || []) {
+  for (const q of doc.questions) {
+    if (!q || typeof q !== 'object') {
+      err(where, 'invalid question entry');
+      continue;
+    }
     const w = `${where} ${q.id || '(no id)'}`;
     if (!str(q.id)) err(w, 'missing id');
     else if (qIds.has(q.id)) err(w, 'duplicate question id');
@@ -114,7 +150,7 @@ for (const f of files) {
 
     if (q.type === 'listening') {
       if (!Array.isArray(q.script) || !q.script.length) err(w, 'listening needs script');
-      else if (q.script.some(l => !['M', 'F', 'N'].includes(l.s) || !str(l.t))) err(w, 'script lines need s (M/F/N) and t');
+      else if (q.script.some(l => !l || !['M', 'F', 'N'].includes(l.s) || !str(l.t))) err(w, 'script lines need s (M/F/N) and t');
       if (q.sub !== 'response' && !str(q.ask)) err(w, 'listening needs ask (the spoken question)');
     } else if (!str(q.q)) {
       err(w, 'missing question text (q)');
@@ -124,23 +160,41 @@ for (const f of files) {
       if (!str(q.passage)) err(w, `${q.type} needs a passage id`);
       else passageUse[q.passage] = (passageUse[q.passage] || 0) + 1;
     }
-    if (q.type === 'order') {
+    if (q.type === 'order' && str(q.q)) {
       const stars = (q.q.match(/＿★＿/g) || []).length;
       const blanks = (q.q.match(/＿＿/g) || []).length;
       if (stars !== 1 || blanks !== 3) err(w, `order question needs 3 × ＿＿ and 1 × ＿★＿ (found ${blanks} / ${stars})`);
+      if (q.order !== undefined) {
+        const star = (q.q.match(/＿★＿|＿＿/g) || []).indexOf('＿★＿');
+        if (!Array.isArray(q.order) || q.order.length !== q.choices.length ||
+            new Set(q.order).size !== q.choices.length ||
+            q.order.some(i => !Number.isInteger(i) || i < 0 || i >= q.choices.length)) {
+          err(w, 'order must be a permutation of zero-based choice indices');
+        } else if (q.order[star] !== q.answer) {
+          err(w, 'the choice in the ★ slot must match answer');
+        }
+      }
     }
     if (q.type === 'kanji' && !/__.+__/.test(q.q)) err(w, 'kanji question must underline the word with __…__');
     if (q.type === 'paraphrase' && !/__.+__/.test(q.q)) err(w, 'paraphrase question must underline the phrase with __…__');
-    if (q.type === 'usage' && !/^\S+$/.test(q.q.trim())) warn(w, 'usage q should be just the target word');
+    if (q.type === 'usage' && str(q.q) && !/^\S+$/.test(q.q.trim())) warn(w, 'usage q should be just the target word');
   }
 
   for (const c of doc.learn?.grammar || []) {
+    if (!c || typeof c !== 'object') {
+      err(where, 'invalid grammar card entry');
+      continue;
+    }
     const w = `${where} card ${c.id}`;
     if (!str(c.id) || cardIds.has(c.id)) err(w, 'missing or duplicate card id');
     cardIds.add(c.id);
     if (!str(c.point) || !str(c.ja) || !Array.isArray(c.ex) || !c.ex.length) err(w, 'grammar card needs point, ja, ex[]');
   }
   for (const c of doc.learn?.vocab || []) {
+    if (!c || typeof c !== 'object') {
+      err(where, 'invalid vocab card entry');
+      continue;
+    }
     const w = `${where} card ${c.id}`;
     if (!str(c.id) || cardIds.has(c.id)) err(w, 'missing or duplicate card id');
     cardIds.add(c.id);
@@ -150,6 +204,21 @@ for (const f of files) {
 
 for (const q of allQuestions) {
   if (q.passage && !allPassages[q.passage]) err(q.id, `passage "${q.passage}" not found`);
+  if (q.evidence !== undefined) {
+    const p = allPassages[q.passage];
+    const e = q.evidence;
+    if (!e || !str(e.quote) || typeof p?.text !== 'string' || !p.text.includes(e.quote)) {
+      err(q.id, 'evidence.quote must be an exact excerpt of the question passage');
+      continue;
+    }
+    if (e.distractors !== undefined &&
+        (!e.distractors || typeof e.distractors !== 'object' || Array.isArray(e.distractors) ||
+          Object.entries(e.distractors).some(([key, text]) =>
+            !/^[0-3]$/.test(key) || !Array.isArray(q.choices) || +key >= q.choices.length ||
+            +key === q.answer || !str(text)))) {
+      err(q.id, 'evidence.distractors must map incorrect choice indices to explanations');
+    }
+  }
 }
 for (const id of Object.keys(allPassages)) {
   if (!passageUse[id]) warn(`passage ${id}`, 'has no questions');
@@ -158,7 +227,7 @@ for (const id of Object.keys(allPassages)) {
 // Near-duplicate prompts usually mean the generator repeated itself.
 const seenQ = new Map();
 for (const q of allQuestions) {
-  if (!q.q || q.passage) continue;
+  if (!str(q.q) || q.passage) continue;
   const key = q.q.replace(/\s|__|＿|★/g, '');
   if (seenQ.has(key)) warn(q.id, `same question text as ${seenQ.get(key)}`);
   else seenQ.set(key, q.id);

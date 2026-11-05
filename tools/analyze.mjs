@@ -1,20 +1,17 @@
 #!/usr/bin/env node
-// Reads the learner's synced attempts (progress branch) and prints a weakness report
-// that the daily generator uses to decide what to write next.
+// Analyzes an explicitly selected private local export or a directory of fixtures.
 //
 // Usage:
-//   git fetch origin progress
-//   node tools/analyze.mjs                 # reads progress files from origin/progress
-//   node tools/analyze.mjs --dir path/     # or from a local folder of progress JSON files
-//   node tools/analyze.mjs --json          # machine-readable output
-//   node tools/analyze.mjs --gate FILE     # improver: has the learner finished a round or sent a note since FILE's mark?
-//   node tools/analyze.mjs --mark FILE     # improver: record that everything up to now has been handled
+//   node tools/analyze.mjs --backup /private/path/backup.json
+//   node tools/analyze.mjs --dir /private/path/fixtures --json
+//   Add --gate FILE to check new activity or --mark FILE after handling it.
 
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
-import { estimateScores } from '../js/estimate.js';
+import { BACKUP_KIND, BACKUP_VERSION } from '../js/backup.js';
+import { firstAttemptEvidence } from '../js/estimate.js';
+import { contentDateJst } from '../js/data.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -22,8 +19,8 @@ const opt = name => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : null;
 };
-const ref = opt('--ref') || 'origin/progress';
 const dir = opt('--dir');
+const backup = opt('--backup');
 const asJSON = args.includes('--json');
 const gateFile = opt('--gate');
 const markFile = opt('--mark');
@@ -45,22 +42,32 @@ for (const f of files) {
 
 // ---- load attempts ----
 function progressDocs() {
+  if (Boolean(dir) === Boolean(backup)) throw new Error('Pass exactly one private input using --backup FILE or --dir DIRECTORY.');
   if (dir) {
-    if (!existsSync(dir)) return [];
     return readdirSync(dir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')));
   }
-  try {
-    const names = execFileSync('git', ['ls-tree', '-r', '--name-only', ref, '--', 'progress/'], { cwd: ROOT, encoding: 'utf8' })
-      .split('\n')
-      .filter(n => n.endsWith('.json'));
-    return names.map(n => JSON.parse(execFileSync('git', ['show', `${ref}:${n}`], { cwd: ROOT, encoding: 'utf8' })));
-  } catch (e) {
-    console.error(`Could not read ${ref} (run: git fetch origin progress). ${e.message.split('\n')[0]}`);
-    return [];
+  const doc = JSON.parse(readFileSync(backup, 'utf8'));
+  const source = doc.kind === BACKUP_KIND && doc.version === BACKUP_VERSION ? doc.state : doc;
+  if (!Array.isArray(source?.log)) throw new Error('Invalid or unsupported study backup.');
+  const learnedDays = new Map();
+  for (const [id, date] of Object.entries(source.learned || {})) {
+    if (!learnedDays.has(date)) learnedDays.set(date, []);
+    learnedDays.get(date).push(id);
   }
+  return [{ attempts: source.log, events: source.events, feedback: source.feedback },
+    ...[...learnedDays].map(([date, learned]) => ({ date, learned }))];
 }
 
-const docs = progressDocs();
+let docs;
+try {
+  docs = progressDocs();
+  if (docs.some(d => !d || ['attempts', 'events', 'feedback', 'learned'].some(k => d[k] !== undefined && !Array.isArray(d[k])))) {
+    throw new Error('The supplied progress data has an invalid record collection.');
+  }
+} catch (err) {
+  console.error(`Study input unavailable: ${err.message}`);
+  process.exit(1);
+}
 const byT = (a, b) => a.t - b.t;
 const allAttempts = docs.flatMap(d => d.attempts || []).sort(byT);
 const attempts = allAttempts.filter(a => !a.rt);
@@ -92,9 +99,8 @@ if (gateFile || markFile) {
 
 const SEC = { reading: 'read', listening: 'listen' };
 const secOf = q => SEC[q.type] || 'lang';
-const today = new Date();
-const dstr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const daysAgo = n => dstr(new Date(today.getFullYear(), today.getMonth(), today.getDate() - n));
+const today = contentDateJst();
+const daysAgo = n => new Date(Date.parse(today) - n * 86400000).toISOString().slice(0, 10);
 
 function agg(since) {
   const out = { sec: {}, type: {}, sub: {}, tag: {}, n: 0, c: 0, lucky: 0 };
@@ -187,9 +193,9 @@ if (latestDaily) {
   latestDailyUsage = { date: latestDaily, questions: ids.length, attempted: done };
 }
 
-// ---- estimated JLPT score (same formula as the app's home screen) ----
-const estimate14 = estimateScores(attempts, Q, daysAgo(13));
-const estimateAll = estimateScores(attempts, Q);
+// ---- first-attempt practice evidence (same rules as the app) ----
+const evidence14 = firstAttemptEvidence(attempts, Q, daysAgo(13));
+const evidenceAll = firstAttemptEvidence(attempts, Q);
 
 // ---- behaviour: how the app is actually used (for the improver agent) ----
 const recentEvents = events.filter(e => e.d >= daysAgo(6));
@@ -287,7 +293,7 @@ const report = {
   readingSpeed: speed,
   unseenInBank: unseen,
   latestDailyUsage,
-  estimate: { last14: estimate14, allTime: estimateAll },
+  firstAttemptEvidence: { last14: evidence14, allTime: evidenceAll },
   behavior,
   flaggedQuestions: flagged,
   feedbackNotes: notes,
@@ -299,13 +305,14 @@ if (asJSON) {
 }
 
 const lines = [];
-lines.push(`# Learner report — ${dstr(today)}`);
+lines.push(`# Learner report — ${today}`);
 lines.push(`Attempts: ${all.n} total · ${report.daysStudied} day(s) studied · last study day: ${report.lastStudyDay || 'none yet'}`);
 if (latestDailyUsage) lines.push(`Latest daily file ${latestDailyUsage.date}: ${latestDailyUsage.attempted}/${latestDailyUsage.questions} questions attempted`);
-const est = e => ['lang', 'read', 'listen'].map(k => `${k} ${e.sections[k].score ?? '—'}/60 (n=${e.sections[k].n})`).join(' · ') + ` · total ${e.total ?? '—'}/180${e.total != null ? (e.pass ? ' PASS' : ' below pass') : ''}`;
-lines.push('', '## Estimated JLPT score (pass = 100 total, every section ≥19)');
-lines.push(`- last 14 days: ${est(estimate14)}`);
-lines.push(`- all time: ${est(estimateAll)}`);
+const describeEvidence = entries => Object.entries(entries).map(([key, { accuracy, n, types, passages }]) =>
+  `${key} ${accuracy == null ? 'insufficient evidence' : `${Math.round(accuracy * 100)}%`} (${n} unique, ${types} types${key === 'read' ? `, ${passages} passages` : ''})`).join(' · ');
+lines.push('', '## First-attempt N1 practice accuracy');
+lines.push(`- last 14 days: ${describeEvidence(evidence14)}`);
+lines.push(`- all time: ${describeEvidence(evidenceAll)}`);
 lines.push('', '## Per day (last 7)');
 for (const [d, a] of Object.entries(report.perDayLast7)) lines.push(`- ${d}: ${rate(a)}`);
 lines.push('', '## Accuracy by section (last 7 days | all time)');
