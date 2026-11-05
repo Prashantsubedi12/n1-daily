@@ -70,13 +70,12 @@ export function summaryLine(rate) {
 }
 
 // The home-screen greeting: time of day, then the one thing to do next.
-export function greeting({ hour, todays, goal, due, streak }) {
+export function greeting({ hour, todays, goal, due }) {
   const hi = hour < 5 ? 'まだ起きてる？' : hour < 11 ? pick(['おはよう！', 'ナマステ🙏']) : hour < 18 ? pick(['こんにちは！', 'ナマステ🙏']) : 'おつかれさま！';
-  if (todays >= goal) return { mood: 'wow', text: `${hi} 今日の目標${goal}問クリア🎉 えらい！` };
-  if (todays > 0) return { mood: 'happy', text: `${hi} 今日は${todays}問。あと${goal - todays}問で目標達成、いけるよ💪` };
-  const start = due ? `復習が${due}問待ってるよ` : '短い練習から始めよう';
-  if (streak) return { mood: 'calm', text: `${hi} 🔥${streak}日連続中！今日もつなげよう。${start}` };
-  return { mood: 'calm', text: `${hi} 今日はまだ0問。${start}。電車の時間でサクッといこう🚃` };
+  if (todays >= goal) return { mood: 'wow', text: `${hi} 今日の目標クリア！` };
+  if (todays > 0) return { mood: 'happy', text: `${hi} あと${goal - todays}問で目標達成！` };
+  if (due) return { mood: 'calm', text: `${hi} 復習が${due}問待ってるよ。` };
+  return { mood: 'calm', text: `${hi} 今日も短い練習から始めよう。` };
 }
 
 // Progress ring (0..1 of max); the number goes in an overlay next to it.

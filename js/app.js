@@ -18,12 +18,15 @@ let updateActivated = false;
 
 const SECTION_SHORT = { lang: '言語知識', read: '読解', listen: '聴解' };
 
+const BOOK = '<path d="M12 6v14m0-14C9 4 6 4 3 5v13c3-1 6-1 9 2 3-3 6-3 9-2V5c-3-1-6-1-9 1Z"/>';
 const MENU = [
-  { key: 'review', title: '復習', sub: '間違えた・まぐれの問題', icon: '🔁' },
-  { key: 'lang', title: '語彙・文法', sub: '問題1〜6（弱点を優先）', icon: '📝' },
-  { key: 'read', title: '読解', sub: '短文〜長文・時間を計る', icon: '📖' },
-  { key: 'listen', title: '聴解', sub: '音声読み上げ', icon: '🎧' },
+  { key: 'review', title: '復習', sub: '間違いを振り返る', icon: '<path d="M20 7v5h-5M4 17v-5h5m-5 0a8 8 0 0 1 14-5l2 5M4 12l2 5a8 8 0 0 0 14-5"/>' },
+  { key: 'lang', title: '語彙・文法', sub: '弱点を優先して練習', icon: '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>' },
+  { key: 'read', title: '読解', sub: '本文から根拠を探す', icon: BOOK },
+  { key: 'listen', title: '聴解', sub: '音声で聞き取る', icon: '<path d="M4 13v-2a8 8 0 1 1 16 0v2m-16 0h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-5Zm16 0h-2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-5Z"/>' },
 ];
+
+const studyIcon = paths => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
 // ---------- routing ----------
 
@@ -148,7 +151,7 @@ function viewHome() {
   const g = progress();
   const days = g.streak;
   const quests = todayQuests();
-  const hi = greeting({ hour: new Date().getHours(), todays: todays.length, goal, due, streak: days });
+  const hi = greeting({ hour: new Date().getHours(), todays: todays.length, goal, due });
 
   const evidenceRow = key => {
     const sec = first[key];
@@ -161,9 +164,9 @@ function viewHome() {
 
   const status = key => {
     const p = plans[key];
-    if (p && p.pos >= p.ids.length) return { cls: 'done', text: `✓ 完了${p.rounds ? ' ×' + (p.rounds + 1) : ''}`, more: true };
-    if (p && p.pos > 0) return { cls: 'doing', text: `${p.pos} / ${p.ids.length}` };
-    if (key === 'review') return due ? { cls: '', text: `${Math.min(due, sizes.review)}問` } : { cls: 'done', text: 'なし' };
+    if (p && p.pos >= p.ids.length) return { cls: 'done', text: `✓ 完了${p.rounds ? ' ×' + (p.rounds + 1) : ''}`, percent: 100 };
+    if (p && p.pos > 0) return { cls: 'doing', text: `${p.pos} / ${p.ids.length}問`, percent: 100 * p.pos / p.ids.length };
+    if (key === 'review') return { cls: '', text: due ? `${Math.min(due, sizes.review)}問` : '復習待ちなし' };
     if (key === 'read') return { cls: '', text: `約${sizes.read}問` };
     return { cls: '', text: `${sizes[key]}問` };
   };
@@ -175,68 +178,67 @@ function viewHome() {
     : '本日分は利用できません。問題集から練習できます。';
 
   view.innerHTML = `
-  <section class="hero">
-    <div>
-      <div class="muted small">${today.replace(/-/g, '.')}${dayNo > 0 ? `　Day ${dayNo}` : ''}</div>
-      <h1>N1 Daily</h1>
+  <header class="hero">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <g fill="currentColor"><ellipse cx="16" cy="8" rx="4.3" ry="5.8"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(72 16 16)"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(144 16 16)"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(216 16 16)"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(288 16 16)"/></g>
+        <circle cx="16" cy="16" r="2.3" fill="var(--bg)"/>
+      </svg>
+      <div><h1>N1 Daily</h1><p class="brand-sub">JLPT N1 学習アプリ</p></div>
     </div>
-    <div class="countdown" title="試験日 ${EXAM_DATE}">
-      <span class="small">本番まで</span>
-      <b>${dLeft > 0 ? dLeft : dLeft === 0 ? '当日' : '終了'}</b>
-      <span class="small">${dLeft > 0 ? '日' : ''}</span>
+    <div class="home-date">
+      <time datetime="${today}">${today.replace(/-/g, '.')}</time>
+      <div class="countdown" title="試験日 ${EXAM_DATE}">${dayNo > 0 ? `Day ${dayNo} · ` : ''}${dLeft > 0 ? `本番まで<b>${dLeft}日</b>` : dLeft === 0 ? '試験当日' : '試験終了'}</div>
+    </div>
+  </header>
+
+  <section class="card buddy" aria-label="モモ先生と今日の進み具合">
+    <div class="buddy-mascot">${mascot(hi.mood, 'md')}<span>モモ先生</span></div>
+    <div class="bubble">${esc(hi.text)}</div>
+    <div class="goal" role="img" aria-label="今日の目標 ${goal}問中${todays.length}問">
+      ${ring(todays.length, goal)}
+      <div class="goal-num" aria-hidden="true"><span>今日の目標</span><div><b>${todays.length}</b><small>/${goal}</small></div></div>
+    </div>
+    <div class="lvl-row">
+      <span class="lvl" title="${esc(g.title)}">Lv.${g.level}</span>
+      <div class="bar-track" aria-hidden="true"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div>
+      <span class="small muted">${g.xp.toLocaleString('ja-JP')} XP</span>
+      <span class="streak-chip">${days}日連続</span>
+      ${g.freezes ? `<span class="small" title="ストリーク・フリーズ：休んだ日も連続記録を守ります">🧊×${g.freezes}</span>` : ''}
     </div>
   </section>
 
   <section class="card priority" aria-labelledby="priority-title">
-    <p class="priority-label">今日の最優先</p>
-    <h2 id="priority-title">${priorityDraft ? '読解の続き' : '短文で根拠をつかむ'}</h2>
-    <p class="priority-meta">${priorityDraft ? `途中のセッション・${draft.total}問` : recommended ? `読解・短文　約${recommended.minutes}分` : '読解・短文'}</p>
-    <p class="priority-reason">${priorityDraft ? '保存したところから再開できます。'
+    <div class="priority-top"><p class="priority-label"><span aria-hidden="true">✦</span> 今日の最優先</p><span class="priority-meta">${priorityDraft ? `途中・${draft.total}問` : recommended ? `読解・約${recommended.minutes}分` : '読解・短文'}</span></div>
+    <div class="priority-main">
+      <span class="priority-icon">${studyIcon(BOOK)}</span>
+      <div><h2 id="priority-title">${priorityDraft ? '読解の続き' : '短文で根拠をつかむ'}</h2>
+      <p class="priority-reason">${priorityDraft ? '保存したところから再開できます。'
       : priorityDone ? '今日の読解ミッションをクリアしました。'
       : recommended ? esc(recommended.reason) : '短文を読み込めませんでした。練習メニューから利用できる問題を選べます。'}</p>
+      </div>
+    </div>
     ${priorityDraft || (!priorityDone && recommended) ? `<button class="btn primary wide" id="priorityStart">${priorityDraft ? '続きから' : '読解を始める'} <span aria-hidden="true">›</span></button>`
       : priorityDone ? '<a class="btn wide" href="#/review">復習を見る</a>' : '<a class="btn wide" href="#/practice">練習を見る</a>'}
     <p class="small muted" id="offlineReady" role="status">${offlineReady ? 'オフラインで基本教材を利用できます' : ''}</p>
   </section>
 
   ${draft && !priorityDraft ? `<button class="btn wide resume-round" id="resumeRound">続きから <span class="small muted">${esc(draft.title || '途中の練習')}</span></button>` : ''}
-  ${packNotice ? `<div class="content-status small muted"><p>${packNotice}</p><button class="btn" id="retryContent">教材を再確認</button></div>` : ''}
   <button class="btn wide" id="applyUpdate" ${waitingWorker ? '' : 'hidden'}>更新を適用</button>
 
-  <section class="card buddy">
-    ${mascot(hi.mood, 'md float')}
-    <div class="bubble">${esc(hi.text)}</div>
-    <div class="goal" title="今日の目標 ${goal}問">
-      ${ring(todays.length, goal)}
-      <div class="goal-num"><b>${todays.length}</b><small>/${goal}</small></div>
-      <div class="goal-cap">${days ? `🔥${days}日連続` : '今日の目標'}</div>
-    </div>
-    <div class="lvl-row">
-      <span class="lvl">Lv.${g.level}</span>
-      <span class="small"><b>${esc(g.title)}</b></span>
-      <div class="bar-track"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div>
-      <span class="small muted">⚡${g.todayXp} XP 今日</span>
-      ${g.freezes ? `<span class="small" title="ストリーク・フリーズ：休んだ日も連続記録を守ります">🧊×${g.freezes}</span>` : ''}
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="row between">
-      <div class="card-label">📚 今日のメニュー</div>
-      <div class="small muted">${todays.length}問 解答・正答 ${todays.length ? Math.round((todayGood / todays.length) * 100) : 0}%</div>
+  <section class="activities" aria-labelledby="activities-title">
+    <div class="row between activities-heading">
+      <h2 id="activities-title">今日の練習</h2>
+      <div class="small muted">${todays.length ? `${todays.length}問 · 正答 ${Math.round((todayGood / todays.length) * 100)}%` : '4つの学習メニュー'}</div>
     </div>
     <ul class="menu">
-      <li><a class="menu-item${learn.cards.length && learnedToday >= learn.cards.length ? ' done' : ''}" href="#/learn">
-        <span class="mi-icon">✨</span>
-        <span class="mi-body"><b>${learn.date === contentDay ? '今日の新出' : '新出カード'}</b><span class="small muted">文法・語彙カード${learn.cards.length ? `（${learn.cards.length}枚）` : ''}</span></span>
-        <span class="mi-stat">${learn.cards.length ? (learnedToday >= learn.cards.length ? '✓ 完了' : `${learnedToday} / ${learn.cards.length}`) : '—'}</span>
-      </a></li>
       ${MENU.map(m => {
         const s = status(m.key);
         return `<li><button class="menu-item ${s.cls}" data-menu="${m.key}">
-          <span class="mi-icon">${m.icon}</span>
-          <span class="mi-body"><b>${m.title}</b><span class="small muted">${m.sub}</span></span>
-          <span class="mi-stat">${s.text}${s.more ? '<small>もう1セット ›</small>' : ''}</span>
+          <span class="mi-icon">${studyIcon(m.icon)}</span>
+          <span class="mi-body"><b>${m.title}</b><span class="muted">${m.sub}</span></span>
+          <span class="mi-stat">${s.text}<span aria-hidden="true">›</span></span>
+          ${s.percent ? `<span class="bar-track" aria-hidden="true"><i style="width:${s.percent}%"></i></span>` : ''}
         </button></li>`;
       }).join('')}
     </ul>
@@ -244,11 +246,22 @@ function viewHome() {
 
   <section class="card quests">
     <div class="row between">
-      <div class="card-label">🎁 今日のクエスト</div>
+      <h2>今日のクエスト</h2>
       <div class="small muted">${quests.filter(q => q.done).length}/3${quests.every(q => q.done) ? '・🧊ゲット' : '・全部で🧊フリーズ'}</div>
     </div>
     ${questList(quests, quests.map(q => q.done))}
     <a class="btn wide match-btn" href="#/match">🧩 漢字マッチで遊ぶ</a>
+  </section>
+
+  <a class="card learn-link" href="#/learn">
+    <b>${learn.date === contentDay ? '今日の新出' : '新出カード'}</b>
+    <span class="small muted">${learn.cards.length ? `${learnedToday} / ${learn.cards.length}枚` : '文法・語彙'} <span aria-hidden="true">›</span></span>
+  </a>
+
+  <section class="stat-row home-stats" aria-label="学習の記録">
+    <div class="stat"><b>${due}</b><span>復習待ち</span></div>
+    <div class="stat"><b>${g.todayXp}</b><span>今日の XP</span></div>
+    <div class="stat"><b>${pct(rate(agg.sec.read))}</b><span>読解の正答率</span></div>
   </section>
 
   <section class="card coach">
@@ -263,12 +276,7 @@ function viewHome() {
       : ''
   }
 
-  <section class="stat-row">
-    <div class="stat"><b>${days}</b><span>🔥 連続日数</span></div>
-    <div class="stat"><b>${due}</b><span>🔁 復習待ち</span></div>
-    <div class="stat"><b>${pct(rate(agg.sec.read))}</b><span>📖 読解 練習正答率</span></div>
-  </section>
-
+  ${packNotice ? `<div class="content-status small muted"><p>${packNotice}</p><button class="btn" id="retryContent">教材を再確認</button></div>` : ''}
   <section class="sync-line small muted">
     <span>学習記録はこの端末に保存</span>
     <span><a class="gear" href="#/feedback">意見・更新</a>　<a class="gear" href="#/settings" aria-label="設定">設定 ›</a></span>

@@ -9,6 +9,7 @@
 // Uses an isolated browser profile and synthetic study activity.
 
 import { createServer } from 'node:http';
+import assert from 'node:assert/strict';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { join, dirname, extname, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -35,7 +36,10 @@ function serve() {
       res.end('not found');
     }
   });
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
 }
 
 const problems = [];
@@ -55,7 +59,10 @@ const base = urlArg || `http://127.0.0.1:${server.address().port}/`;
 const profile = await mkdtemp(join(tmpdir(), 'n1smoke-'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, userDataDir: profile, args: ['--no-first-run'] });
 const page = await browser.newPage();
-await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+const mobileViewport = width => page.setViewport({
+  width, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+});
+await mobileViewport(390);
 
 const origin = new URL(base).origin;
 let testingOffline = false;
@@ -86,6 +93,53 @@ const go = async hash => {
   await page.waitForFunction(() => document.querySelector('#view')?.children.length > 0);
 };
 const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('n1daily.v1') || '{}'));
+
+async function checkPalette(scheme, expected) {
+  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: scheme }]);
+  const palette = await page.evaluate(keys => {
+    const css = getComputedStyle(document.documentElement);
+    return Object.fromEntries(keys.map(key => [key, css.getPropertyValue(key).trim().toLowerCase()]));
+  }, Object.keys(expected));
+  assert.deepEqual(palette, expected, `${scheme} theme tokens`);
+}
+
+async function checkRouteLayout(width, tab, { home = false, study = false } = {}) {
+  const layout = await page.evaluate(({ home }) => {
+    const root = document.documentElement;
+    const body = getComputedStyle(document.body);
+    const heading = document.querySelector(home ? 'main h1' : 'main .page-title');
+    const primary = document.querySelector('#priorityStart');
+    const nav = document.querySelector('#tabbar');
+    const primaryBox = primary?.getBoundingClientRect();
+    return {
+      width: Math.max(root.scrollWidth, document.body.scrollWidth),
+      font: body.fontFamily,
+      fontSize: Number.parseFloat(body.fontSize),
+      leading: Number.parseFloat(body.lineHeight),
+      title: heading ? Number.parseFloat(getComputedStyle(heading).fontSize) : 0,
+      active: [...nav.querySelectorAll('[aria-current="page"]')].map(el => el.dataset.tab),
+      navHidden: getComputedStyle(nav).display === 'none',
+      visibleAction: primaryBox && primaryBox.height >= 44 && primaryBox.bottom <= nav.getBoundingClientRect().top,
+    };
+  }, { home });
+  // Compare to the configured width because mobile Chrome may expand innerWidth on overflow.
+  assert.ok(layout.width <= width + 1, `content is ${layout.width}px wide at ${width}px`);
+  assert.match(layout.font, /Hiragino|Noto Sans JP|Yu Gothic|Meiryo/i, 'Japanese font stack');
+  assert.ok(layout.fontSize >= 16 && layout.leading >= layout.fontSize * 1.5, 'mobile body typography');
+  if (!study) assert.ok(layout.title >= 20, 'page title is visually distinct');
+  assert.equal(layout.navHidden, study, 'bottom navigation visibility');
+  assert.deepEqual(layout.active, tab ? [tab] : [], 'current tab');
+  if (home) assert.ok(layout.visibleAction, '44px priority action above the bottom navigation');
+}
+
+async function checkNarrowStudyLayout() {
+  try {
+    await mobileViewport(320);
+    await checkRouteLayout(320, null, { study: true });
+  } finally {
+    await mobileViewport(390);
+  }
+}
 
 // Picks an answer: first choice, or for 文の組み立て taps every piece into the blanks.
 async function pickAnswer() {
@@ -118,7 +172,7 @@ async function exitRound() {
 }
 
 const flow = [
-  step('home loads with coach, goal ring, menu and score card', async () => {
+  step('home shows the coach, reading mission and all study shortcuts on mobile', async () => {
     await page.goto(base + '#/', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.menu-item');
     await page.waitForSelector('.coach');
@@ -126,20 +180,28 @@ const flow = [
     await page.waitForSelector('.buddy .ring');
     await page.waitForSelector('.quests .quest-list li');
     await page.waitForSelector('.buddy .lvl');
-    for (const width of [320, 390, 430]) {
-      await page.setViewport({ width, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
-      const layout = await page.evaluate(() => ({
-        overflow: document.documentElement.scrollWidth > innerWidth,
-        buttonHeight: document.querySelector('#priorityStart').getBoundingClientRect().height,
-        current: document.querySelector('#tabbar a[aria-current="page"]')?.textContent.trim(),
-      }));
-      if (layout.overflow || layout.buttonHeight < 44 || layout.current !== 'ホーム') throw new Error(`home layout at ${width}px`);
+    assert.deepEqual(await page.$$eval('#tabbar a', links => links.map(a => a.textContent.trim())),
+      ['ホーム', '新出', '練習', '復習', '記録']);
+    assert.deepEqual(await page.$$eval('.menu [data-menu]', buttons => buttons.map(button => button.dataset.menu)),
+      ['review', 'lang', 'read', 'listen']);
+    await checkPalette('light', { '--bg': '#faf6ed', '--card': '#fffdf8', '--pri': '#244ca6' });
+    try {
+      for (const width of [320, 390, 430]) {
+        await mobileViewport(width);
+        await checkRouteLayout(width, 'home', { home: true });
+      }
+      await mobileViewport(390);
+      await checkPalette('dark', { '--bg': '#191714' });
+      await checkRouteLayout(390, 'home', { home: true });
+    } finally {
+      await mobileViewport(390);
+      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
     }
-    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   }),
   step('priority drill: reveal evidence, reload feedback, then complete once', async () => {
     await tap('#priorityStart');
     await page.waitForSelector('.passage');
+    await checkNarrowStudyLayout();
     const order = await page.$$eval('.choice', buttons => buttons.map(b => b.dataset.i));
     await pickAnswer();
     await tap('.reading-evidence summary');
@@ -220,6 +282,8 @@ const flow = [
   }),
   step('漢字マッチ: clear both boards', async () => {
     await go('#/match');
+    await page.waitForSelector('.match-head');
+    await checkNarrowStudyLayout();
     for (let i = 0; i < 20 && !(await page.$('.match-done')); i++) {
       const k = await page.$eval('.mtile.w:not([disabled])', b => b.dataset.k).catch(() => null);
       if (!k) {
@@ -247,10 +311,31 @@ const flow = [
     await go('#/stats');
     await page.waitForSelector('.badges .badge.got');
   }),
-  ...['practice', 'review', 'stats', 'settings'].map(r =>
-    step(`#/${r} renders`, async () => {
-      await go('#/' + r);
-      await page.waitForSelector('.page-title');
+  ...[
+    ['learn', /新出/, true],
+    ['practice', /^分野別練習$/, true],
+    ['review', /^復習$/, true],
+    ['stats', /^記録$/, true],
+    ['settings', /^設定$/, false],
+    ['feedback', /^意見・更新$/, false],
+  ].map(([route, title, isTab]) =>
+    step(`#/${route} uses the shared mobile theme and tab state`, async () => {
+      try {
+        await go('#/' + route);
+        await page.waitForFunction((pattern, tab) =>
+          new RegExp(pattern).test(document.querySelector('.page-title')?.textContent.trim() || '') &&
+          (document.querySelector('[aria-current="page"]')?.dataset.tab || '') === tab,
+        {}, title.source, isTab ? route : '');
+        for (const width of [320, 390, 430]) {
+          await mobileViewport(width);
+          await checkRouteLayout(width, isTab ? route : null);
+        }
+        await checkPalette('dark', { '--bg': '#191714' });
+        await checkRouteLayout(430, isTab ? route : null);
+      } finally {
+        await mobileViewport(390);
+        await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+      }
     }),
   ),
   step('意見・更新: save feedback on this device', async () => {

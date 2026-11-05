@@ -2,7 +2,7 @@
 
 import { DB } from './data.js';
 import { getState, save, recordAttempt, setLucky, addFeedback, todayStr } from './store.js';
-import { typeLabel } from './engine.js';
+import { secOf, typeLabel } from './engine.js';
 import { $, $$, esc, fmt, paras, mmss, shuffle, plain, toast } from './util.js';
 import * as tts from './speech.js';
 import { mascot, reaction, summaryLine, ring, sparkle, confetti } from './coach.js';
@@ -194,7 +194,7 @@ export function renderQuiz(root) {
   startClock();
 
   root.innerHTML = `
-  <div class="quiz${getState().settings.mincho ? ' mincho' : ''}">
+  <div class="quiz${getState().settings.mincho ? ' mincho' : ''}" data-study-skill="${secOf(q)}">
     <div class="quiz-top">
       <button class="icon-btn" data-act="exit" aria-label="中断してホームへ">✕</button>
       <div class="qprog" role="progressbar" aria-label="問題の進み具合" aria-valuemin="0" aria-valuenow="${S.pos}" aria-valuemax="${n}"><i style="width:${(S.pos / n) * 100}%"></i></div>

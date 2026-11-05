@@ -54,9 +54,9 @@ export function viewPractice(view, runRound) {
     <p class="small muted">右の数字は解いた数 / 問題数、全期間の正答率。</p>
     ${Object.entries(groups)
       .filter(([, items]) => items.length)
-      .map(([sec, items]) => `<h3 class="sec-title">${SECTIONS[sec]}</h3><ul class="rows">${list(items)}</ul>`)
+      .map(([sec, items]) => `<section class="practice-group" data-study-skill="${sec}"><h3 class="sec-title">${SECTIONS[sec]}</h3><ul class="rows">${list(items)}</ul></section>`)
       .join('')}
-    ${n2.length ? `<h3 class="sec-title">N2 復習</h3><ul class="rows"><li><button class="link-row" data-n2><span>N2 文法・語彙ミックス</span><span class="small muted">${n2.filter(q => s[q.id]).length}/${n2.length}</span><span></span></button></li></ul>` : ''}
+    ${n2.length ? `<section class="practice-group" data-study-skill="review"><h3 class="sec-title">N2 復習</h3><ul class="rows"><li><button class="link-row" data-n2><span>N2 文法・語彙ミックス</span><span class="small muted">${n2.filter(q => s[q.id]).length}/${n2.length}</span><span></span></button></li></ul></section>` : ''}
     ${
       weak.length
         ? `<h3 class="sec-title">弱点（直近14日）</h3><div class="chips">${weak
@@ -83,7 +83,7 @@ export function viewReview(view, runRound) {
   const wrong = wrongList();
   view.innerHTML = `
     <h2 class="page-title">復習</h2>
-    <div class="card">
+    <div class="card review-intro">
       <div class="row between">
         <div><b>${due.length}</b> 問が復習のタイミング</div>
         <button class="btn primary" id="dueBtn"${due.length ? '' : ' disabled'}>解く</button>

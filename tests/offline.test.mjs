@@ -6,6 +6,7 @@ import {
   DB, contentDateJst, contentStatus, hasMoreArchive, loadArchive, loadData,
 } from '../js/data.js';
 import { checkDailyFreshness, targetDate } from '../tools/freshness.mjs';
+import { APP_VERSION } from '../js/store.js';
 
 const question = id => ({ id, type: 'kanji', q: '練習', choices: ['練習', '本番'], answer: 0 });
 const bank = { questions: [question('bank-test')] };
@@ -86,7 +87,7 @@ test('verified first install works offline on a subpath and waits for an explici
   await sw.dispatch('activate');
   assert.equal(sw.claimed(), 1);
   assert.deepEqual(await sw.caches.keys(), [
-    'unrelated-cache', 'n1daily:https://example.test/:v1', 'n1daily:' + scope + ':v11',
+    'unrelated-cache', 'n1daily:https://example.test/:v1', 'n1daily:' + scope + ':' + APP_VERSION,
   ]);
   const messages = [];
   await sw.dispatch('message', {
