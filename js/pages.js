@@ -1,8 +1,12 @@
 import { DB } from './data.js';
-import { getState, save, srs, isMastered, todayStr, addDays, diffDays, EXAM_DATE, APP_VERSION, replaceState, addFeedback } from './store.js';
+import {
+  getState, save, srs, isMastered, todayStr, addDays, diffDays, EXAM_DATE, APP_VERSION,
+  setDailyGoal, addFeedback, backupJSON, importBackup, hasRecoveryBackup, restoreRecoveryBackup,
+  resetProgress, getPersistenceError,
+} from './store.js';
+import { MAX_BACKUP_BYTES } from './backup.js';
 import { TYPES, SUBS, SECTIONS, aggregate, rate, weakTags, wrongList, dueList, typeLabel, readingSpeed, secOf } from './engine.js';
-import { $, $$, esc, fmt, plain, pct, toast, ago, mmss } from './util.js';
-import * as sync from './sync.js';
+import { $, $$, esc, fmt, plain, pct, mmss } from './util.js';
 import * as tts from './speech.js';
 import { progress, badges, XP } from './game.js';
 
@@ -50,9 +54,9 @@ export function viewPractice(view, runRound) {
     <p class="small muted">右の数字は解いた数 / 問題数、全期間の正答率。</p>
     ${Object.entries(groups)
       .filter(([, items]) => items.length)
-      .map(([sec, items]) => `<h3 class="sec-title">${SECTIONS[sec]}</h3><ul class="rows">${list(items)}</ul>`)
+      .map(([sec, items]) => `<section class="practice-group" data-study-skill="${sec}"><h3 class="sec-title">${SECTIONS[sec]}</h3><ul class="rows">${list(items)}</ul></section>`)
       .join('')}
-    ${n2.length ? `<h3 class="sec-title">N2 復習</h3><ul class="rows"><li><button class="link-row" data-n2><span>N2 文法・語彙ミックス</span><span class="small muted">${n2.filter(q => s[q.id]).length}/${n2.length}</span><span></span></button></li></ul>` : ''}
+    ${n2.length ? `<section class="practice-group" data-study-skill="review"><h3 class="sec-title">N2 復習</h3><ul class="rows"><li><button class="link-row" data-n2><span>N2 文法・語彙ミックス</span><span class="small muted">${n2.filter(q => s[q.id]).length}/${n2.length}</span><span></span></button></li></ul></section>` : ''}
     ${
       weak.length
         ? `<h3 class="sec-title">弱点（直近14日）</h3><div class="chips">${weak
@@ -79,7 +83,7 @@ export function viewReview(view, runRound) {
   const wrong = wrongList();
   view.innerHTML = `
     <h2 class="page-title">復習</h2>
-    <div class="card">
+    <div class="card review-intro">
       <div class="row between">
         <div><b>${due.length}</b> 問が復習のタイミング</div>
         <button class="btn primary" id="dueBtn"${due.length ? '' : ' disabled'}>解く</button>
@@ -176,9 +180,9 @@ export function viewStats(view, runRound) {
     </section>
 
     <section class="card">
-      <div class="card-label">分野別 正答率（直近14日）</div>
+      <div class="card-label">分野別 練習正答率（直近14日）</div>
       ${['lang', 'read', 'listen'].map(secBar).join('')}
-      <p class="small muted">縦線 = 目標70%。合格は総合100/180点＋各分野19点以上。練習では各分野70%を安定して超えることを目標に。</p>
+      <p class="small muted">この集計には繰り返し練習も含みます。縦線は練習目標の70%です。本試験の合格基準は換算点で総合100/180点以上・各分野19点以上です。</p>
     </section>
 
     <section class="card">
@@ -212,9 +216,22 @@ export function viewStats(view, runRound) {
 
 // ---------- 設定 ----------
 
+const BACKUP_STATUS = 'n1daily.backup-status';
+
+function takeBackupStatus() {
+  try {
+    const message = sessionStorage.getItem(BACKUP_STATUS);
+    if (message) sessionStorage.removeItem(BACKUP_STATUS);
+    return message;
+  } catch {
+    return null;
+  }
+}
+
 export function viewSettings(view) {
   const st = getState();
   const s = st.settings;
+  const restored = takeBackupStatus();
   const voices = tts.japaneseVoices();
   const voiceOpts = sel => ['<option value="">自動</option>', ...voices.map(v => `<option${v.name === sel ? ' selected' : ''}>${esc(v.name)}</option>`)].join('');
 
@@ -244,43 +261,22 @@ export function viewSettings(view) {
     </section>
 
     <section class="card form">
-      <div class="card-label">GitHub 同期</div>
-      <p class="small">解答の記録をGitHubに送ると、毎朝の新しい問題があなたの間違いに合わせて作られます。</p>
-      <label class="field"><span>リポジトリ</span><input id="ghRepo" value="${esc(s.ghRepo)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>トークン</span><input id="ghToken" type="password" value="${esc(s.ghToken)}" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-      <div class="btn-row">
-        <button class="btn" id="ghTest">接続テスト</button>
-        <button class="btn primary" id="ghSync">今すぐ同期</button>
-        <button class="btn" id="ghRestore">GitHubから復元</button>
-      </div>
-      <p class="small muted" id="ghStatus">アプリ ${APP_VERSION}・最終同期：${ago(st.sync.last)}・この端末の解答 ${sync.localCount()}問${st.sync.error ? ` ・<span class="ng">${esc(st.sync.error)}</span>` : ''}</p>
-      <p class="small muted">※ iPhoneの「ホーム画面のアプリ」とSafariは記録が別々です。問題を解く方にトークンを入れてください。</p>
-      <details class="help"><summary>トークンの作り方</summary>
-        <ol class="small">
-          <li>github.com → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token</li>
-          <li>Repository access：<b>Only select repositories</b> → <code>n1-daily</code> だけ</li>
-          <li>Permissions → Repository permissions → <b>Contents：Read and write</b>（他は不要）</li>
-          <li>有効期限は 2026年12月末 くらいに設定 → 生成された <code>github_pat_…</code> をここに貼る</li>
-        </ol>
-        <p class="small muted">トークンはこの端末のブラウザにだけ保存されます。記録（問題IDと正誤）は公開リポジトリの <code>progress</code> ブランチに保存されます。</p>
-      </details>
-    </section>
-
-    <section class="card form">
-      <div class="card-label">データ</div>
-      <div class="btn-row">
-        <button class="btn" id="export">バックアップを保存</button>
-        <label class="btn">バックアップを読込<input type="file" id="import" accept="application/json" hidden></label>
-      </div>
+      <div class="card-label">学習記録とバックアップ</div>
+      <p class="small">学習記録はこのアプリ内に保存されます。別の端末やSafariから移すときは、バックアップを使ってください。</p>
+      <button class="btn" id="export">バックアップを保存</button>
+      <label class="field"><span>復元方法</span><select id="restoreMode"><option value="merge">現在の記録に追加</option><option value="replace">記録と設定を置き換え</option></select></label>
+      <label class="field"><span>バックアップを読み込む</span><input type="file" id="import" accept=".json,application/json"></label>
+      <button class="btn" id="recover"${hasRecoveryBackup() ? '' : ' disabled'}>操作前の記録に戻す</button>
       <button class="btn danger" id="reset">記録をすべて消す</button>
-      <p class="small muted">端末ID：${esc(st.deviceId)}・問題数：${DB.list.length}・試験日：${EXAM_DATE}</p>
+      <p class="small" role="status" id="backupStatus" tabindex="-1">${esc(getPersistenceError() || restored || '')}</p>
+      <p class="small muted">アプリ ${APP_VERSION}・問題数：${DB.list.length}・試験日：${EXAM_DATE}</p>
     </section>`;
 
   const set = (k, v) => {
     s[k] = v;
     save();
   };
-  $('#daily').addEventListener('change', e => set('daily', Number(e.target.value)));
+  $('#daily').addEventListener('change', e => setDailyGoal(Number(e.target.value)));
   $('#showEn').addEventListener('change', e => set('showEn', e.target.checked));
   $('#sound').addEventListener('change', e => set('sound', e.target.checked));
   $('#mincho').addEventListener('change', e => set('mincho', e.target.checked));
@@ -302,64 +298,66 @@ export function viewSettings(view) {
     ]),
   );
 
-  const status = msg => ($('#ghStatus').innerHTML = esc(msg));
-  $('#ghRepo').addEventListener('change', e => set('ghRepo', e.target.value.trim()));
-  $('#ghToken').addEventListener('change', e => set('ghToken', e.target.value.trim()));
-  $('#ghTest').addEventListener('click', async () => {
-    set('ghRepo', $('#ghRepo').value.trim());
-    set('ghToken', $('#ghToken').value.trim());
-    status('確認中…');
+  const status = msg => { $('#backupStatus', view).textContent = msg; };
+  const updated = msg => {
+    status(msg);
     try {
-      status(await sync.testConnection());
-    } catch (e) {
-      status('通信エラー：' + e.message);
+      sessionStorage.setItem(BACKUP_STATUS, msg);
+    } catch {
+      // The import is already durable even if the status cannot survive reload.
     }
-  });
-  $('#ghSync').addEventListener('click', async () => {
-    set('ghToken', $('#ghToken').value.trim());
-    status('同期中…');
-    const r = await sync.syncNow();
-    status(r.msg);
-  });
-  $('#ghRestore').addEventListener('click', async () => {
-    set('ghToken', $('#ghToken').value.trim());
-    status('復元中…');
-    try {
-      const n = await sync.restore();
-      status(`${n}件の記録を取り込みました`);
-    } catch (e) {
-      status(e.message);
-    }
-  });
-
+    location.reload();
+  };
+  if (restored) $('#backupStatus', view).focus();
   $('#export').addEventListener('click', () => {
-    const copy = { ...st, settings: { ...st.settings, ghToken: '' } };
-    const blob = new Blob([JSON.stringify(copy)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `n1-daily-backup-${todayStr()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    try {
+      const blob = new Blob([backupJSON()], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `n1-daily-backup-${todayStr()}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (err) {
+      status('保存できませんでした。' + err.message);
+    }
   });
   $('#import').addEventListener('change', async e => {
-    const f = e.target.files[0];
+    const input = e.currentTarget;
+    const f = input.files[0];
     if (!f) return;
+    const mode = $('#restoreMode', view).value;
+    input.value = '';
+    if (mode === 'replace' && !confirm('この端末の記録と設定を、選んだバックアップで置き換えますか？')) return;
+    input.disabled = true;
     try {
-      const data = JSON.parse(await f.text());
-      if (!Array.isArray(data.log)) throw new Error('形式が違います');
-      data.settings = { ...st.settings, ...data.settings, ghToken: st.settings.ghToken };
-      replaceState({ ...st, ...data });
-      toast('読み込みました');
-      location.reload();
+      if (f.size > MAX_BACKUP_BYTES) throw new Error('バックアップは8 MB以下のJSONファイルを選んでください。');
+      const raw = await f.text();
+      if (!view.contains(input)) return;
+      importBackup(raw, mode);
+      updated('バックアップから復元しました。');
     } catch (err) {
-      toast('読み込めませんでした：' + err.message);
+      if (view.contains(input)) status('読み込めませんでした。' + err.message);
+    } finally {
+      input.disabled = false;
+    }
+  });
+  $('#recover').addEventListener('click', () => {
+    if (!confirm('最後の復元または消去の前の記録に戻しますか？')) return;
+    try {
+      restoreRecoveryBackup();
+      updated('操作前の記録に戻しました。');
+    } catch (err) {
+      status(err.message);
     }
   });
   $('#reset').addEventListener('click', () => {
     if (!confirm('この端末の学習記録をすべて消します。よろしいですか？')) return;
-    replaceState({ ...st, log: [], events: [], learned: {}, plans: {}, sync: { shas: {}, counts: {}, last: 0, error: '' } });
-    toast('消去しました');
-    location.hash = '#/';
+    try {
+      resetProgress();
+      updated('記録を消去しました。');
+    } catch (err) {
+      status(err.message);
+    }
   });
 }
 
@@ -375,15 +373,15 @@ export function viewFeedback(view) {
 
     <section class="card form">
       <div class="card-label">アプリへの意見</div>
-      <p class="small muted">使いにくい所・欲しい機能・おかしな所を書いてください。勉強した日の夜に改善エージェントが読んで、アプリを直します。問題の誤りは、解説の下の「⚑ この問題を報告」から。</p>
+      <p class="small muted">使いにくい所・欲しい機能を記録できます。問題の誤りは解説の下からメモできます。</p>
       <textarea id="fbText" rows="4" maxlength="1000" placeholder="例：読解の本文が長くて、問題に戻るのが大変"></textarea>
-      <button class="btn primary wide" id="fbSend">送る</button>
-      <p class="small muted" id="fbStatus">※ GitHubの公開リポジトリに保存されます。個人情報は書かないでください。</p>
+      <button class="btn primary wide" id="fbSend">端末に保存</button>
+      <p class="small muted" id="fbStatus" role="status">メモはこの端末に保存されます。</p>
     </section>
 
     ${
       sent.length
-        ? `<section class="card"><div class="card-label">送った意見</div><ul class="fb-list">${sent
+        ? `<section class="card"><div class="card-label">保存したメモ</div><ul class="fb-list">${sent
             .map(f => `<li><span class="small muted">${f.d.slice(5).replace('-', '/')}${f.id ? '・問題 ' + esc(f.id) : ''}</span><div>${esc(f.text)}</div></li>`)
             .join('')}</ul></section>`
         : ''
@@ -400,18 +398,11 @@ export function viewFeedback(view) {
       }
     </section>`;
 
-  $('#fbSend').addEventListener('click', async () => {
+  $('#fbSend').addEventListener('click', () => {
     const text = $('#fbText').value.trim();
     if (!text) return;
     addFeedback(text);
     $('#fbText').value = '';
-    const status = $('#fbStatus');
-    if (!sync.configured()) {
-      status.textContent = '保存しました。GitHub同期を設定すると届きます。';
-      return;
-    }
-    status.textContent = '送信中…';
-    const r = await sync.syncNow();
-    status.textContent = r.ok ? '届きました。ありがとう。' : `保存しました（送信は次回）：${r.msg}`;
+    $('#fbStatus').textContent = getPersistenceError() || '端末に保存しました。';
   });
 }

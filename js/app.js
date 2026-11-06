@@ -1,26 +1,32 @@
-import { load, save, getState, todayStr, diffDays, addDays, EXAM_DATE, logEvent } from './store.js';
-import { DB, loadData, latestDaily, learnFor } from './data.js';
-import { buildRound, dueList, menuSizes, streak, aggregate, rate, estimate } from './engine.js';
-import { startQuiz, renderQuiz, hasSession, leaveQuiz, quizKey, questList } from './quiz.js';
+import { load, save, getState, getPersistenceError, setLearned, todayStr, diffDays, addDays, EXAM_DATE, logEvent } from './store.js';
+import { DB, loadData, loadArchive, hasMoreArchive, contentDateJst, contentStatus, learnFor } from './data.js';
+import { buildRound, dueList, menuSizes, aggregate, rate, evidence, recommendReading } from './engine.js';
+import { startQuiz, renderQuiz, hasSession, leaveQuiz, quizKey, questList, restoreQuiz, activeQuiz, resumeQuiz, savedQuizQuestionIds } from './quiz.js';
 import { viewMatch, leaveMatch } from './match.js';
 import { progress, todayQuests, newBadges } from './game.js';
 import { viewPractice, viewReview, viewStats, viewSettings, viewFeedback } from './pages.js';
-import { $, $$, esc, fmt, toast, ago, pct } from './util.js';
-import { MIN_ANSWERS, PASS } from './estimate.js';
-import * as sync from './sync.js';
+import { $, $$, esc, fmt, toast, pct } from './util.js';
+import { MIN_ANSWERS, MIN_TYPES, MIN_PASSAGES } from './estimate.js';
 import * as tts from './speech.js';
 import { mascot, greeting, ring, sparkle, confetti } from './coach.js';
 
 const view = $('#view');
+let waitingWorker;
+let offlineReady = false;
+let applyingUpdate = false;
+let updateActivated = false;
 
 const SECTION_SHORT = { lang: '言語知識', read: '読解', listen: '聴解' };
 
+const BOOK = '<path d="M12 6v14m0-14C9 4 6 4 3 5v13c3-1 6-1 9 2 3-3 6-3 9-2V5c-3-1-6-1-9 1Z"/>';
 const MENU = [
-  { key: 'review', title: '復習', sub: '間違えた・まぐれの問題', icon: '🔁' },
-  { key: 'lang', title: '語彙・文法', sub: '問題1〜6（弱点を優先）', icon: '📝' },
-  { key: 'read', title: '読解', sub: '短文〜長文・時間を計る', icon: '📖' },
-  { key: 'listen', title: '聴解', sub: '音声読み上げ', icon: '🎧' },
+  { key: 'review', title: '復習', sub: '間違いを振り返る', icon: '<path d="M20 7v5h-5M4 17v-5h5m-5 0a8 8 0 0 1 14-5l2 5M4 12l2 5a8 8 0 0 0 14-5"/>' },
+  { key: 'lang', title: '語彙・文法', sub: '弱点を優先して練習', icon: '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>' },
+  { key: 'read', title: '読解', sub: '本文から根拠を探す', icon: BOOK },
+  { key: 'listen', title: '聴解', sub: '音声で聞き取る', icon: '<path d="M4 13v-2a8 8 0 1 1 16 0v2m-16 0h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-5Zm16 0h-2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-5Z"/>' },
 ];
+
+const studyIcon = paths => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
 // ---------- routing ----------
 
@@ -36,14 +42,31 @@ const ROUTES = {
   match: () => viewMatch(view),
 };
 
-function route() {
+function routeName() {
   const name = location.hash.replace(/^#\/?/, '');
+  return Object.hasOwn(ROUTES, name) ? name : '';
+}
+
+function route(event) {
+  const name = routeName();
   if (name !== 'quiz' && hasSession()) leaveQuiz();
   if (name !== 'match') leaveMatch();
+  if (!name && updateActivated) {
+    location.reload();
+    return;
+  }
   document.body.classList.toggle('in-quiz', name === 'quiz' || name === 'match');
-  $$('#tabbar a').forEach(a => a.classList.toggle('active', a.dataset.tab === (name || 'home')));
-  (ROUTES[name] || viewHome)();
-  if (name !== 'quiz') window.scrollTo(0, 0);
+  $$('#tabbar a').forEach(a => {
+    const current = a.dataset.tab === (name || 'home');
+    a.classList.toggle('active', current);
+    if (current) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  ROUTES[name]();
+  if (name !== 'quiz') {
+    window.scrollTo(0, 0);
+    if (event) view.focus({ preventScroll: true });
+  }
 }
 
 // ---------- rounds ----------
@@ -54,13 +77,14 @@ export function runRound(kind, arg, title) {
     toast('出題できる問題がありません');
     return;
   }
-  logEvent('start', { m: kind, n: ids.length });
-  startQuiz({ ids, title, onDone: info => afterRound(kind, info) });
+  openRound({ ids, title, context: { kind, key: Array.isArray(arg) ? arg.join('・') : String(arg ?? '') } });
 }
 
 function startMenu(key) {
   const st = getState();
   const today = todayStr();
+  const existing = activeQuiz();
+  if (existing?.kind === 'menu' && existing.key === `${today}/${key}`) return resumeQuiz();
   const plans = (st.plans[today] ||= {});
   let p = plans[key];
   if (!p || p.pos >= p.ids.length) {
@@ -73,25 +97,31 @@ function startMenu(key) {
     save();
   }
   const item = MENU.find(m => m.key === key);
-  logEvent('start', { m: key, n: p.ids.length - p.pos });
-  startQuiz({
+  openRound({
     ids: p.ids,
     start: p.pos,
     title: item.title,
-    onProgress: pos => {
-      p.pos = pos;
-      save();
-    },
-    onDone: info => afterRound(key, info),
+    context: { kind: 'menu', key: `${today}/${key}` },
   });
 }
 
-function afterRound(m, info) {
-  logEvent('end', { m, ...info });
-  if (!sync.configured()) return;
-  sync.syncNow().then(r => {
-    if (!r.ok && r.msg !== 'オフライン' && r.msg !== '同期中') toast(r.msg);
-  });
+function bindRound({ kind = 'practice', key = '' } = {}) {
+  const [date, menu] = kind === 'menu' ? key.split('/') : [];
+  const plan = getState().plans[date]?.[menu];
+  const m = menu || kind;
+  return {
+    onProgress: plan ? pos => {
+      plan.pos = pos;
+    } : undefined,
+    onDone: info => logEvent('end', { m, ...(kind === 'priority' ? { priorityDate: key } : {}), ...info }, { eventId: `end:${info.roundId}`, persist: false }),
+  };
+}
+
+function openRound({ ids, start, title, context }) {
+  const existing = activeQuiz();
+  if (existing && !window.confirm('途中のラウンドがあります。保存済みの解答は残し、新しいラウンドを始めますか？')) return;
+  logEvent('start', { m: context.kind === 'menu' ? context.key.split('/')[1] : context.kind, n: ids.length - (start || 0) });
+  startQuiz({ ids, start, title, context, ...bindRound(context) });
 }
 
 // ---------- home ----------
@@ -99,104 +129,116 @@ function afterRound(m, info) {
 function viewHome() {
   const st = getState();
   const today = todayStr();
+  const contentDay = contentDateJst();
   const dLeft = diffDays(today, EXAM_DATE);
-  const daily = latestDaily(today);
+  const pack = contentStatus(contentDay);
+  const recommended = recommendReading(contentDay, { bankOnly: pack.state !== 'current' }) || recommendReading(contentDay);
+  const draft = activeQuiz();
+  const priorityDraft = draft?.kind === 'priority';
+  const priorityDone = st.events.some(e => e.k === 'end' && e.fin && e.priorityDate === contentDay);
   const sizes = menuSizes();
   const plans = st.plans[today] || {};
   const due = dueList().length;
   const todays = st.log.filter(e => e.d === today && !e.rt);
   const todayGood = todays.filter(e => e.ok && !e.lk).length;
-  const learn = learnFor(today);
+  const learn = learnFor(contentDay);
   const learnedToday = learn.cards.filter(c => st.learned[c.id]).length;
   const agg = aggregate(14);
-  const est = estimate();
+  const first = evidence();
   const news = (DB.changelog || [])[0];
   const freshNews = news && news.date >= addDays(today, -6);
   const goal = st.settings.daily;
   const g = progress();
   const days = g.streak;
   const quests = todayQuests();
-  const hi = greeting({ hour: new Date().getHours(), todays: todays.length, goal, due, streak: days });
+  const hi = greeting({ hour: new Date().getHours(), todays: todays.length, goal, due });
 
-  const estRow = key => {
-    const sec = est.sections[key];
-    const w = sec.score == null ? 0 : Math.round((sec.score / 60) * 100);
-    const cls = sec.score == null ? '' : sec.score >= 30 ? 'good' : sec.score >= PASS.section ? 'mid' : 'low';
+  const evidenceRow = key => {
+    const sec = first[key];
     return `<div class="est-row">
       <span class="est-name">${SECTION_SHORT[key]}</span>
-      <div class="bar-track"><i class="${cls}" style="width:${w}%"></i><span class="target" style="left:${(PASS.section / 60) * 100}%"></span></div>
-      <b class="est-num">${sec.score == null ? '—' : sec.score}</b>
+      <span class="small muted">${sec.n}問・${sec.types}形式${key === 'read' ? `・${sec.passages}文章` : ''}</span>
+      <b class="est-num"${sec.accuracy == null ? ' aria-label="データ不足"' : ''}>${sec.accuracy == null ? '—' : pct(sec.accuracy)}</b>
     </div>`;
   };
 
   const status = key => {
     const p = plans[key];
-    if (p && p.pos >= p.ids.length) return { cls: 'done', text: `✓ 完了${p.rounds ? ' ×' + (p.rounds + 1) : ''}`, more: true };
-    if (p && p.pos > 0) return { cls: 'doing', text: `${p.pos} / ${p.ids.length}` };
-    if (key === 'review') return due ? { cls: '', text: `${Math.min(due, sizes.review)}問` } : { cls: 'done', text: 'なし' };
+    if (p && p.pos >= p.ids.length) return { cls: 'done', text: `✓ 完了${p.rounds ? ' ×' + (p.rounds + 1) : ''}`, percent: 100 };
+    if (p && p.pos > 0) return { cls: 'doing', text: `${p.pos} / ${p.ids.length}問`, percent: 100 * p.pos / p.ids.length };
+    if (key === 'review') return { cls: '', text: due ? `${Math.min(due, sizes.review)}問` : '復習待ちなし' };
     if (key === 'read') return { cls: '', text: `約${sizes.read}問` };
     return { cls: '', text: `${sizes[key]}問` };
   };
 
   const dayNo = DB.index?.start ? diffDays(DB.index.start, today) + 1 : null;
+  const packNotice = pack.state === 'current' && !pack.unavailable.length ? '' : pack.state === 'current'
+    ? '一部の教材を読み込めませんでした。利用できる問題で練習できます。'
+    : pack.date ? `本日分は利用できません。最新の教材は ${pack.date.replace(/-/g, '/')} です。`
+    : '本日分は利用できません。問題集から練習できます。';
 
   view.innerHTML = `
-  <section class="hero">
-    <div>
-      <div class="muted small">${today.replace(/-/g, '.')}${dayNo > 0 ? `　Day ${dayNo}` : ''}</div>
-      <h1>N1 Daily</h1>
+  <header class="hero">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <g fill="currentColor"><ellipse cx="16" cy="8" rx="4.3" ry="5.8"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(72 16 16)"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(144 16 16)"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(216 16 16)"/><ellipse cx="16" cy="8" rx="4.3" ry="5.8" transform="rotate(288 16 16)"/></g>
+        <circle cx="16" cy="16" r="2.3" fill="var(--bg)"/>
+      </svg>
+      <div><h1>N1 Daily</h1><p class="brand-sub">JLPT N1 学習アプリ</p></div>
     </div>
-    <div class="countdown" title="試験日 ${EXAM_DATE}">
-      <span class="small">本番まで</span>
-      <b>${dLeft > 0 ? dLeft : dLeft === 0 ? '当日' : '終了'}</b>
-      <span class="small">${dLeft > 0 ? '日' : ''}</span>
+    <div class="home-date">
+      <time datetime="${today}">${today.replace(/-/g, '.')}</time>
+      <div class="countdown" title="試験日 ${EXAM_DATE}">${dayNo > 0 ? `Day ${dayNo} · ` : ''}${dLeft > 0 ? `本番まで<b>${dLeft}日</b>` : dLeft === 0 ? '試験当日' : '試験終了'}</div>
     </div>
-  </section>
+  </header>
 
-  <section class="card buddy">
-    ${mascot(hi.mood, 'md float')}
+  <section class="card buddy" aria-label="モモ先生と今日の進み具合">
+    <div class="buddy-mascot">${mascot(hi.mood, 'md')}<span>モモ先生</span></div>
     <div class="bubble">${esc(hi.text)}</div>
-    <div class="goal" title="今日の目標 ${goal}問">
+    <div class="goal" role="img" aria-label="今日の目標 ${goal}問中${todays.length}問">
       ${ring(todays.length, goal)}
-      <div class="goal-num"><b>${todays.length}</b><small>/${goal}</small></div>
-      <div class="goal-cap">${days ? `🔥${days}日連続` : '今日の目標'}</div>
+      <div class="goal-num" aria-hidden="true"><span>今日の目標</span><div><b>${todays.length}</b><small>/${goal}</small></div></div>
     </div>
     <div class="lvl-row">
-      <span class="lvl">Lv.${g.level}</span>
-      <span class="small"><b>${esc(g.title)}</b></span>
-      <div class="bar-track"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div>
-      <span class="small muted">⚡${g.todayXp} XP 今日</span>
+      <span class="lvl" title="${esc(g.title)}">Lv.${g.level}</span>
+      <div class="bar-track" aria-hidden="true"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div>
+      <span class="small muted">${g.xp.toLocaleString('ja-JP')} XP</span>
+      <span class="streak-chip">${days}日連続</span>
       ${g.freezes ? `<span class="small" title="ストリーク・フリーズ：休んだ日も連続記録を守ります">🧊×${g.freezes}</span>` : ''}
     </div>
   </section>
 
-  ${
-    daily?.report
-      ? `<section class="card report">
-          <div class="card-label">💡 今日のポイント${daily.date !== today ? `（${daily.date.slice(5).replace('-', '/')}）` : ''}</div>
-          <div class="report-text clamp" id="reportText">${fmt(daily.report)}</div>
-          <button class="linkish" id="reportMore" hidden>続きを読む ▾</button>
-        </section>`
-      : ''
-  }
+  <section class="card priority" aria-labelledby="priority-title">
+    <div class="priority-top"><p class="priority-label"><span aria-hidden="true">✦</span> 今日の最優先</p><span class="priority-meta">${priorityDraft ? `途中・${draft.total}問` : recommended ? `読解・約${recommended.minutes}分` : '読解・短文'}</span></div>
+    <div class="priority-main">
+      <span class="priority-icon">${studyIcon(BOOK)}</span>
+      <div><h2 id="priority-title">${priorityDraft ? '読解の続き' : '短文で根拠をつかむ'}</h2>
+      <p class="priority-reason">${priorityDraft ? '保存したところから再開できます。'
+      : priorityDone ? '今日の読解ミッションをクリアしました。'
+      : recommended ? esc(recommended.reason) : '短文を読み込めませんでした。練習メニューから利用できる問題を選べます。'}</p>
+      </div>
+    </div>
+    ${priorityDraft || (!priorityDone && recommended) ? `<button class="btn primary wide" id="priorityStart">${priorityDraft ? '続きから' : '読解を始める'} <span aria-hidden="true">›</span></button>`
+      : priorityDone ? '<a class="btn wide" href="#/review">復習を見る</a>' : '<a class="btn wide" href="#/practice">練習を見る</a>'}
+    <p class="small muted" id="offlineReady" role="status">${offlineReady ? 'オフラインで基本教材を利用できます' : ''}</p>
+  </section>
 
-  <section class="card">
-    <div class="row between">
-      <div class="card-label">📚 今日のメニュー</div>
-      <div class="small muted">${todays.length}問 解答・正答 ${todays.length ? Math.round((todayGood / todays.length) * 100) : 0}%</div>
+  ${draft && !priorityDraft ? `<button class="btn wide resume-round" id="resumeRound">続きから <span class="small muted">${esc(draft.title || '途中の練習')}</span></button>` : ''}
+  <button class="btn wide" id="applyUpdate" ${waitingWorker ? '' : 'hidden'}>更新を適用</button>
+
+  <section class="activities" aria-labelledby="activities-title">
+    <div class="row between activities-heading">
+      <h2 id="activities-title">今日の練習</h2>
+      <div class="small muted">${todays.length ? `${todays.length}問 · 正答 ${Math.round((todayGood / todays.length) * 100)}%` : '4つの学習メニュー'}</div>
     </div>
     <ul class="menu">
-      <li><a class="menu-item${learn.cards.length && learnedToday >= learn.cards.length ? ' done' : ''}" href="#/learn">
-        <span class="mi-icon">✨</span>
-        <span class="mi-body"><b>今日の新出</b><span class="small muted">文法・語彙カード${learn.cards.length ? `（${learn.cards.length}枚）` : ''}</span></span>
-        <span class="mi-stat">${learn.cards.length ? (learnedToday >= learn.cards.length ? '✓ 完了' : `${learnedToday} / ${learn.cards.length}`) : '—'}</span>
-      </a></li>
       ${MENU.map(m => {
         const s = status(m.key);
         return `<li><button class="menu-item ${s.cls}" data-menu="${m.key}">
-          <span class="mi-icon">${m.icon}</span>
-          <span class="mi-body"><b>${m.title}</b><span class="small muted">${m.sub}</span></span>
-          <span class="mi-stat">${s.text}${s.more ? '<small>もう1セット ›</small>' : ''}</span>
+          <span class="mi-icon">${studyIcon(m.icon)}</span>
+          <span class="mi-body"><b>${m.title}</b><span class="muted">${m.sub}</span></span>
+          <span class="mi-stat">${s.text}<span aria-hidden="true">›</span></span>
+          ${s.percent ? `<span class="bar-track" aria-hidden="true"><i style="width:${s.percent}%"></i></span>` : ''}
         </button></li>`;
       }).join('')}
     </ul>
@@ -204,20 +246,28 @@ function viewHome() {
 
   <section class="card quests">
     <div class="row between">
-      <div class="card-label">🎁 今日のクエスト</div>
+      <h2>今日のクエスト</h2>
       <div class="small muted">${quests.filter(q => q.done).length}/3${quests.every(q => q.done) ? '・🧊ゲット' : '・全部で🧊フリーズ'}</div>
     </div>
     ${questList(quests, quests.map(q => q.done))}
     <a class="btn wide match-btn" href="#/match">🧩 漢字マッチで遊ぶ</a>
   </section>
 
+  <a class="card learn-link" href="#/learn">
+    <b>${learn.date === contentDay ? '今日の新出' : '新出カード'}</b>
+    <span class="small muted">${learn.cards.length ? `${learnedToday} / ${learn.cards.length}枚` : '文法・語彙'} <span aria-hidden="true">›</span></span>
+  </a>
+
+  <section class="stat-row home-stats" aria-label="学習の記録">
+    <div class="stat"><b>${due}</b><span>復習待ち</span></div>
+    <div class="stat"><b>${g.todayXp}</b><span>今日の XP</span></div>
+    <div class="stat"><b>${pct(rate(agg.sec.read))}</b><span>読解の正答率</span></div>
+  </section>
+
   <section class="card coach">
-    <div class="row between">
-      <div class="card-label">🎯 推定スコア <span class="muted small">直近14日</span></div>
-      <div class="est-total">${est.total == null ? '<span class="small muted">データ不足</span>' : `<b>${est.total}</b><span class="small muted"> / 180</span>`}</div>
-    </div>
-    ${['lang', 'read', 'listen'].map(estRow).join('')}
-    <p class="small muted">${estNote(est)} 正答率からの概算です。</p>
+    <div class="card-label">N1 初回正答率 <span class="muted small">直近14日${Object.values(first).every(s => s.accuracy == null) ? '・データ不足' : ''}</span></div>
+    ${['lang', 'read', 'listen'].map(evidenceRow).join('')}
+    <p class="small muted">各分野${MIN_ANSWERS}問・${MIN_TYPES}形式以上（読解は${MIN_PASSAGES}文章以上）で表示します。本試験の換算点とは別の練習指標です。</p>
   </section>
 
   ${
@@ -226,52 +276,37 @@ function viewHome() {
       : ''
   }
 
-  <section class="stat-row">
-    <div class="stat"><b>${days}</b><span>🔥 連続日数</span></div>
-    <div class="stat"><b>${due}</b><span>🔁 復習待ち</span></div>
-    <div class="stat"><b>${pct(rate(agg.sec.read))}</b><span>📖 読解 正答率</span></div>
-  </section>
-
+  ${packNotice ? `<div class="content-status small muted"><p>${packNotice}</p><button class="btn" id="retryContent">教材を再確認</button></div>` : ''}
   <section class="sync-line small muted">
-    ${
-      sync.configured()
-        ? `同期：${st.sync.error ? `<span class="ng">${esc(st.sync.error)}</span>` : ago(st.sync.last)}`
-        : `<a href="#/settings">GitHub同期を設定</a>すると、毎日の問題があなたの弱点に合わせて作られます`
-    }
+    <span>学習記録はこの端末に保存</span>
     <span><a class="gear" href="#/feedback">意見・更新</a>　<a class="gear" href="#/settings" aria-label="設定">設定 ›</a></span>
   </section>`;
 
   $$('[data-menu]', view).forEach(b => b.addEventListener('click', () => startMenu(b.dataset.menu)));
+  $('#priorityStart', view)?.addEventListener('click', () => {
+    if (priorityDraft) return resumeQuiz();
+    openRound({ ids: recommended.ids, title: '今日の最優先・読解', context: { kind: 'priority', key: contentDay } });
+  });
+  $('#resumeRound', view)?.addEventListener('click', resumeQuiz);
+  $('#retryContent', view)?.addEventListener('click', () => location.reload());
+  $('#applyUpdate', view)?.addEventListener('click', event => {
+    if (!waitingWorker || applyingUpdate) return;
+    applyingUpdate = true;
+    event.currentTarget.disabled = true;
+    waitingWorker.postMessage({ type: 'APPLY_UPDATE' });
+  });
   const fresh = newBadges();
   if (fresh.length) {
     confetti();
     toast(`🏅 新しいバッジ：${fresh.map(b => b.icon + b.name).join('・')}`);
   }
-  // The day's report can be long; keep it to a few lines so 今日のメニュー stays near the top.
-  const rep = $('#reportText', view);
-  const more = $('#reportMore', view);
-  if (rep && rep.scrollHeight > rep.clientHeight + 4) {
-    more.hidden = false;
-    more.addEventListener('click', () => {
-      const open = rep.classList.toggle('clamp') === false;
-      more.textContent = open ? '閉じる ▴' : '続きを読む ▾';
-    });
-  }
-}
-
-function estNote(est) {
-  if (est.total == null) return `各分野${MIN_ANSWERS}問以上解くと表示されます。`;
-  if (est.pass) return `合格ライン（合計${PASS.total}・各分野${PASS.section}）を超えています。このペースを保とう。`;
-  const low = Object.entries(est.sections).filter(([, s]) => s.score < PASS.section).map(([k]) => SECTION_SHORT[k]);
-  const gap = PASS.total - est.total;
-  return [gap > 0 ? `合格まであと<b>${gap}</b>点。` : '', low.length ? `${low.join('・')}が${PASS.section}点未満（足切り）。最優先で。` : ''].join('');
 }
 
 // ---------- learn ----------
 
 function viewLearn() {
   const st = getState();
-  const today = todayStr();
+  const today = contentDateJst();
   const { date, cards } = learnFor(today);
   const grammar = cards.filter(c => c.kind === 'grammar');
   const vocab = cards.filter(c => c.kind === 'vocab');
@@ -308,7 +343,7 @@ function viewLearn() {
   const quizCount = DB.list.filter(q => !q.passage && (q.tags || []).some(t => tags.includes(t))).length;
 
   view.innerHTML = `
-  <h2 class="page-title">今日の新出 <span class="small muted">${date ? date.slice(5).replace('-', '/') : ''}</span></h2>
+  <h2 class="page-title">${date === today ? '今日の新出' : '新出カード'} <span class="small muted">${date ? date.slice(5).replace('-', '/') : ''}</span></h2>
   ${!cards.length ? '<p class="muted">新出カードはまだありません。</p>' : ''}
   ${grammar.length ? `<h3 class="sec-title">文法 <span class="muted small">${grammar.length}</span></h3>${grammar.map(card).join('')}` : ''}
   ${vocab.length ? `<h3 class="sec-title">語彙 <span class="muted small">${vocab.length}</span></h3>${vocab.map(card).join('')}` : ''}
@@ -321,18 +356,17 @@ function viewLearn() {
           .map(d => {
             const cs = DB.learn.filter(c => c.date === d);
             const n = cs.filter(c => st.learned[c.id]).length;
-            return `<li><button class="link-row" data-day="${d}"><span>${d.slice(5).replace('-', '/')}</span><span class="muted small">${cs.map(c => c.point || c.w).slice(0, 4).join('・')}…</span><span class="small">${n}/${cs.length}</span></button></li>`;
+            return `<li><button class="link-row" data-day="${d}"><span>${d.slice(5).replace('-', '/')}</span><span class="muted small">${esc(cs.map(c => c.point || c.w).slice(0, 4).join('・'))}…</span><span class="small">${n}/${cs.length}</span></button></li>`;
           })
           .join('')}</ul>`
       : ''
-  }`;
+  }
+  ${hasMoreArchive() ? '<button class="btn wide" id="loadArchive">過去の教材を読み込む</button>' : ''}`;
 
   $$('[data-learn]', view).forEach(cb =>
     cb.addEventListener('change', () => {
-      if (cb.checked) st.learned[cb.dataset.learn] = today;
-      else delete st.learned[cb.dataset.learn];
+      setLearned(cb.dataset.learn, cb.checked);
       cb.closest('.lcard').classList.toggle('learned', cb.checked);
-      save();
       if (!cb.checked) return;
       sparkle(cb);
       if (cards.every(c => st.learned[c.id])) {
@@ -348,6 +382,23 @@ function viewLearn() {
     }),
   );
   $('#learnQuiz')?.addEventListener('click', () => runRound('tag', tags, '新出の確認'));
+  $('#loadArchive', view)?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = '読み込み中…';
+    try {
+      await loadArchive();
+      if (button.isConnected) {
+        viewLearn();
+        view.focus({ preventScroll: true });
+        if (hasMoreArchive()) toast('一部の教材を読み込めませんでした。');
+      }
+    } catch {
+      button.disabled = false;
+      button.textContent = '過去の教材を読み込む';
+      toast('過去の教材を読み込めませんでした。');
+    }
+  });
   $$('[data-day]', view).forEach(b =>
     b.addEventListener('click', () => {
       const d = b.dataset.day;
@@ -367,44 +418,85 @@ function noteOpen() {
   logEvent('open');
 }
 
-function registerSW() {
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    // A new deploy's worker takes over while this page still runs the old code.
-    // Reload once so the new code runs now (iOS home-screen apps rarely do a real reload).
-    const hadController = !!navigator.serviceWorker.controller;
-    let reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController || reloaded || location.hash.startsWith('#/quiz')) return;
-      reloaded = true;
-      location.reload();
+function checkOfflineStatus() {
+  const worker = navigator.serviceWorker?.controller;
+  if (!worker) return;
+  const { port1, port2 } = new MessageChannel();
+  const timeout = setTimeout(() => port1.close(), 3000);
+  port1.onmessage = ({ data }) => {
+    clearTimeout(timeout);
+    port1.close();
+    if (data?.type !== 'OFFLINE_STATUS') return;
+    offlineReady = data.ready === true;
+    const status = $('#offlineReady', view);
+    if (status) status.textContent = offlineReady ? 'オフラインで基本教材を利用できます' : '';
+  };
+  worker.postMessage({ type: 'OFFLINE_STATUS' }, [port2]);
+}
+
+async function registerSW() {
+  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (applyingUpdate) {
+      updateActivated = true;
+      if (!routeName()) location.reload();
+    } else checkOfflineStatus();
+  });
+  try {
+    const registration = await navigator.serviceWorker.register('sw.js');
+    const showWaiting = () => {
+      waitingWorker = navigator.serviceWorker.controller && registration.waiting;
+      const button = $('#applyUpdate', view);
+      if (button) button.hidden = !waitingWorker;
+    };
+    showWaiting();
+    registration.addEventListener('updatefound', () => {
+      registration.installing?.addEventListener('statechange', showWaiting);
     });
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('sw', err));
+    checkOfflineStatus();
+  } catch (err) {
+    console.warn('sw', err);
   }
 }
 
+function renderPersistenceStatus() {
+  const status = $('#persistenceStatus');
+  if (!status) return;
+  const message = getPersistenceError();
+  status.textContent = message;
+  status.hidden = !message;
+}
+
 async function boot() {
+  document.addEventListener('n1daily:persistence-error', renderPersistenceStatus);
   load();
-  const s = getState().settings;
-  document.body.classList.toggle('big', !!s.big);
+  renderPersistenceStatus();
+  const st = getState();
+  document.body.classList.toggle('big', !!st.settings.big);
   registerSW();
   document.addEventListener('keydown', quizKey);
   try {
-    await loadData();
-  } catch (e) {
-    view.innerHTML = `<div class="card"><p>問題データを読み込めませんでした。</p><p class="small muted">${esc(e.message)}</p><button class="btn" onclick="location.reload()">再読み込み</button></div>`;
+    const planIds = Object.values(st.plans).flatMap(day => Object.values(day).flatMap(plan => plan.ids));
+    const learnedDates = Object.values(st.learned);
+    await loadData({ questionIds: [...st.log.map(a => a.id), ...planIds, ...savedQuizQuestionIds()], learnedDates });
+  } catch {
+    view.innerHTML = '<div class="card"><p>問題データを読み込めませんでした。接続を確認して、もう一度お試しください。</p><button class="btn" id="retryLoad">再読み込み</button></div>';
+    $('#retryLoad', view).addEventListener('click', () => location.reload());
     return;
   }
+  restoreQuiz(bindRound);
   window.addEventListener('hashchange', route);
   route();
-  const syncIfPending = () => sync.configured() && sync.hasPending() && sync.syncNow();
   noteOpen();
-  syncIfPending();
-  window.addEventListener('online', syncIfPending);
-  // iOS home-screen apps resume without reloading and may be killed while hidden:
-  // push answers both when the app is put away mid-round and when it comes back.
+  window.addEventListener('online', checkOfflineStatus);
+  let lastDay = `${todayStr()}/${contentDateJst()}`;
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') noteOpen();
-    syncIfPending();
+    if (document.hidden) return;
+    noteOpen();
+    checkOfflineStatus();
+    const day = `${todayStr()}/${contentDateJst()}`;
+    if (lastDay !== day && !routeName()) viewHome();
+    lastDay = day;
   });
 }
 

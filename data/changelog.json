@@ -2,6 +2,18 @@
   "note": "App updates shown in the app (意見・更新). Newest first. Written by the improver agent; see IMPROVER.md.",
   "entries": [
     {
+      "date": "2026-11-05",
+      "version": "v12",
+      "title": "学習画面のデザインを一新",
+      "detail": "落ち着いた配色と読みやすい文字で、ホームから解説まで見やすくしました。ホームでは復習・語彙と文法・読解・聴解を色分けしています。"
+    },
+    {
+      "date": "2026-11-05",
+      "version": "v11",
+      "title": "短文で根拠をつかむ",
+      "detail": "ホームの「今日の最優先」から短い読解に挑戦できます。解答後に根拠と選択肢の落とし穴を確認できます。途中の練習は再開でき、学習記録は端末に保存されます。"
+    },
+    {
       "date": "2026-11-03",
       "version": "v10",
       "title": "XP・レベル・クエスト・漢字マッチ",

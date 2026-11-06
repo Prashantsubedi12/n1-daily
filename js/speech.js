@@ -10,6 +10,7 @@ const MALE = /otoya|hattori|ichiro|keita|daichi|naoki|male|男/i;
 const NOVELTY = /eddy|flo\b|grandma|grandpa|reed|rocko|sandy|shelley|albert|bahh|bells|boing|bubbles|cellos|jester|organ|superstar|trinoids|whisper|wobble|zarvox|junior|ralph|fred|kathy/i;
 const QUALITY = /enhanced|premium|拡張|プレミアム|natural|neural|online/i;
 let voices = [];
+let playback = null;
 
 function best(list) {
   return list.find(v => QUALITY.test(v.name)) || list[0] || null;
@@ -49,10 +50,12 @@ function chunks(text) {
 }
 
 // parts: [{who: 'F'|'M'|'N', text}]
-export function speak(parts, onEnd) {
+export function speak(parts, callbacks = {}) {
   if (!supported) return false;
+  const { onStart, onEnd, onError } = typeof callbacks === 'function' ? { onEnd: callbacks } : callbacks;
+  stop();
   refresh();
-  speechSynthesis.cancel();
+  if (!voices.length) return false;
   const roles = cast();
   const rate = getState().settings.rate || 1;
   const utts = [];
@@ -68,12 +71,48 @@ export function speak(parts, onEnd) {
     }
   }
   if (!utts.length) return false;
-  utts[utts.length - 1].onend = () => onEnd && onEnd();
-  utts.forEach(u => speechSynthesis.speak(u));
+  const current = { timer: null, started: false, utterances: utts };
+  playback = current;
+  const finish = (error) => {
+    if (playback !== current) return;
+    clearTimeout(current.timer);
+    playback = null;
+    if (error) {
+      speechSynthesis.cancel();
+      onError?.(error);
+    } else onEnd?.();
+  };
+  const watch = (ms, reason) => {
+    clearTimeout(current.timer);
+    current.timer = setTimeout(() => finish(reason), ms);
+  };
+  for (const [i, u] of current.utterances.entries()) {
+    u.onstart = () => {
+      if (playback !== current) return;
+      watch(Math.max(8000, Math.ceil(u.text.length / (u.rate * 3) * 1000) + 4000), 'speech-timeout');
+      if (current.started) return;
+      current.started = true;
+      onStart?.();
+    };
+    u.onend = () => {
+      if (playback !== current) return;
+      if (i === current.utterances.length - 1) finish();
+      else watch(8000, 'speech-queue-timeout');
+    };
+    u.onerror = event => finish(event?.error || 'speech-error');
+  }
+  watch(5000, 'speech-start-timeout');
+  try {
+    current.utterances.forEach(u => speechSynthesis.speak(u));
+  } catch {
+    finish('speech-error');
+  }
   return true;
 }
 
 export function stop() {
+  clearTimeout(playback?.timer);
+  playback = null;
   if (supported) speechSynthesis.cancel();
 }
 

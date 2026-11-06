@@ -37,17 +37,21 @@ function pairs() {
 let M = null;
 
 export function viewMatch(view) {
+  leaveMatch();
   const all = pairs();
   if (all.length < PER_BOARD) {
     view.innerHTML = '<p class="muted center">マッチに使える単語がまだありません。</p>';
     return;
   }
-  M = { all, board: 0, miss: 0, missed: new Set(), start: Date.now(), pick: null, left: 0, timer: null };
+  M = { all, board: 0, miss: 0, missed: new Set(), start: Date.now(), pick: null, left: 0, timer: null, transition: null };
   renderBoard(view);
 }
 
 export function leaveMatch() {
-  if (M) clearInterval(M.timer);
+  if (M) {
+    clearInterval(M.timer);
+    clearTimeout(M.transition);
+  }
   M = null;
 }
 
@@ -113,7 +117,12 @@ function tap(b, view) {
     });
     sparkle(b);
     sound('ok');
-    if (--M.left === 0) setTimeout(() => nextBoard(view), 450);
+    if (--M.left === 0) {
+      const session = M;
+      M.transition = setTimeout(() => {
+        if (M === session) nextBoard(view);
+      }, 450);
+    }
   } else {
     M.miss++;
     M.missed.add(a.dataset.side === 'w' ? a.dataset.k : b.dataset.k);

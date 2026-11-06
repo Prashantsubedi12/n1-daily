@@ -1,0 +1,279 @@
+/* Shared study surfaces. Skill colors carry across practice lists and question screens. */
+[data-study-skill="lang"] { --skill-soft: var(--lang-soft); }
+[data-study-skill="read"] { --skill-soft: var(--pri-soft); }
+[data-study-skill="listen"] { --skill-soft: var(--listen-soft, var(--pri-soft)); }
+[data-study-skill="review"] { --skill-soft: var(--ok-soft); }
+
+.page-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin: 10px 0 16px;
+  font-size: clamp(1.45em, 5.6vw, 1.85em);
+  font-weight: 750;
+}
+.page-title .small {
+  border-radius: 999px;
+  background: var(--pri-soft);
+  color: var(--pri);
+  padding: 3px 10px;
+  font-size: 0.55em;
+  font-variant-numeric: tabular-nums;
+}
+.page-title .small:empty, #backupStatus:empty { display: none; }
+.page-title ~ .card .card-label { font-size: 0.88em; letter-spacing: 0; }
+.page-title ~ :is(.card, .stat-row, .past-days, .notebook) { overflow-wrap: anywhere; }
+.page-title ~ .card :is(.btn, .linkish, .chip), .page-title ~ .row .btn,
+.page-title ~ .chips .chip, .quiz :is(.linkish, .chip), .script > summary {
+  min-height: 44px;
+}
+.page-title ~ .btn, .sum-actions .btn { text-decoration: none; }
+
+/* Practice, review, and learning cards */
+.practice-group {
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.practice-group .sec-title {
+  margin: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 12px 14px;
+  background: var(--skill-soft);
+  color: var(--ink);
+}
+.practice-group .link-row {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  border-block-start: 1px solid var(--line);
+  background: transparent;
+}
+.practice-group li:last-child .link-row { border-radius: 0 0 var(--radius) var(--radius); }
+.practice-group .link-row > span:first-child { min-width: 0; }
+.practice-group .link-row:focus-visible { outline-offset: -3px; }
+.practice-group .link-row > span:nth-child(2) { font-variant-numeric: tabular-nums; }
+@media (hover: hover) {
+  .practice-group .link-row:hover { background: var(--skill-soft); }
+}
+
+.review-intro {
+  background: var(--ok-soft);
+  border-color: var(--line);
+}
+.review-intro .row > div > b {
+  color: var(--ok);
+  font-size: 1.65em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.review-intro .btn { flex-shrink: 0; }
+.notebook li, .lcard { border-radius: var(--radius); }
+.notebook summary { min-height: 52px; }
+.notebook .nb-type {
+  align-self: flex-start;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  padding: 1px 8px;
+}
+.nb-a { line-height: 1.6; }
+.nb-body, .lc-body { border-block-start-style: solid; }
+
+.lcard summary {
+  align-items: center;
+  min-height: 54px;
+  gap: 3px 10px;
+}
+.lcard summary:focus-visible { outline-offset: -3px; }
+.lcard .lc-main { flex: 1 1 9em; overflow-wrap: anywhere; }
+.lcard .lc-sub {
+  border-radius: 8px;
+  background: var(--lang-soft);
+  color: var(--ink);
+  padding: 2px 7px;
+}
+.lcard.vocab .lc-sub { background: var(--pri-soft); }
+.lcard.learned summary {
+  background: var(--ok-soft);
+  opacity: 1;
+}
+.lcard:not(.learned) summary::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-inline-start: auto;
+  border-block-end: 1.5px solid var(--sub);
+  border-inline-end: 1.5px solid var(--sub);
+  transform: rotate(45deg);
+}
+.lcard[open]:not(.learned) summary::after { transform: rotate(225deg); }
+.lc-body { padding: 10px 14px 14px; }
+.lcard :is(.say, .check) { min-height: 44px; }
+.lcard .say { min-width: 44px; color: var(--pri); }
+
+/* Records, settings, and notes */
+.lvl-card .lvl-row { flex-wrap: wrap; }
+.lvl-card .lvl-row .bar-track { flex: 1 1 4em; }
+.page-title ~ .card .lvl, .summary .lvl {
+  background: var(--pri);
+  color: var(--pri-ink);
+}
+.page-title ~ .card .lvl-row .bar-track i, .summary .lvl-row .bar-track i { background: var(--pri); }
+.badge {
+  min-width: 0;
+  opacity: 1;
+  background: var(--card);
+}
+.badge:not(.got) .bicon { opacity: 0.65; }
+.badge.got { border-color: var(--line); background: var(--ok-soft); }
+.page-title ~ .stat-row .stat { min-width: 0; }
+.tbl th:not(:first-child), .tbl td:not(:first-child) { white-space: nowrap; }
+.tbl th, .tbl td { padding-inline: 4px; }
+.dc-col span { font-variant-numeric: tabular-nums; }
+
+.form :is(select, textarea, input[type="file"]) {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  font-size: max(16px, 1em);
+  border-radius: 12px;
+}
+.form textarea { resize: vertical; }
+.form textarea:focus-visible { outline: 3px solid var(--pri); outline-offset: 3px; }
+.form :is(.switch, input[type="range"]) { min-height: 44px; }
+.form .switch { margin: 2px 0; }
+.form input[type="file"]::file-selector-button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-inline-end: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--pri);
+  background: var(--pri-soft);
+}
+:is(.form, .lcard) input { accent-color: var(--pri); }
+#backupStatus:not(:empty) {
+  border-radius: 12px;
+  background: var(--pri-soft);
+  color: var(--ink);
+  padding: 10px 12px;
+  margin-block: 12px;
+}
+
+/* Quiz, listening player, and feedback */
+.quiz-top {
+  border-block-end: 1px solid var(--line);
+  margin-block-end: 12px;
+}
+.quiz-top .icon-btn {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.quiz-top :is(.qcount, .ptimer) { font-variant-numeric: tabular-nums; }
+.qtype {
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: var(--skill-soft, var(--pri-soft));
+  color: var(--ink);
+}
+.quiz .qtext {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+  scroll-margin-top: calc(72px + env(safe-area-inset-top));
+}
+.passage > summary {
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--skill-soft, var(--pri-soft));
+  color: var(--ink);
+}
+.passage[open] > summary { border-radius: var(--radius) var(--radius) 0 0; }
+.passage .ptext { padding-block-start: 12px; overflow-wrap: anywhere; }
+.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.choices.long, .quiz[data-study-skill="read"] .choices { grid-template-columns: minmax(0, 1fr); }
+.choices :is(.choice, .tile) { min-width: 0; overflow-wrap: anywhere; }
+.choice .num { background: var(--skill-soft, var(--pri-soft)); color: var(--ink); }
+.choice:is(.correct, .wrong) .num { color: var(--card); }
+.slot { min-height: 44px; max-width: 100%; }
+.tile.used { opacity: 1; color: var(--sub); background: var(--bg); border-bottom-width: 1.5px; }
+[data-act="submit-order"] { min-height: 48px; }
+
+.listen {
+  background: var(--listen-soft, var(--pri-soft));
+  align-items: flex-start;
+  min-width: 0;
+}
+.listen > div { min-width: 0; }
+.listen .lnote { margin-block-start: 3px; overflow-wrap: anywhere; }
+.listen .play { width: 52px; height: 52px; }
+.script > summary { padding-block: 9px; }
+
+.fb { scroll-margin-block: calc(68px + env(safe-area-inset-top)) calc(62px + env(safe-area-inset-bottom)); }
+.fb-head {
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--ok-soft);
+  align-items: flex-start;
+}
+.fb-ng .fb-head { background: var(--ng-soft); }
+.fb-who { flex: 1 1 11em; }
+.fb :is(.exp, .en, .reading-distractor) { overflow-wrap: anywhere; }
+.fb .exp { line-height: 1.75; }
+.reading-evidence {
+  background: var(--pri-soft);
+  border-radius: 8px 12px 12px 8px;
+}
+.reading-evidence[open] { padding-block-end: 10px; }
+.reading-evidence blockquote { line-height: 1.8; overflow-wrap: anywhere; }
+.quiz-actions:is(.ok, .ng) .btn.primary {
+  background: var(--pri);
+  border-color: var(--pri);
+  color: var(--pri-ink);
+  min-height: 48px;
+}
+
+/* Match and round results */
+.match-head, .sum-hero {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.match-head .bubble { flex: 1; }
+.mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mtile { min-width: 0; overflow-wrap: anywhere; }
+.mtile.w:not(.picked, .matched, .nope) { background: var(--lang-soft); }
+.mtile.r:not(.picked, .matched, .nope) { background: var(--pri-soft); }
+.mtile.matched { opacity: 1; color: var(--ok); }
+.mtile.picked { box-shadow: 0 0 0 1.5px var(--pri) inset; }
+.summary .sum-hero .momo { width: 84px; height: 84px; }
+.summary .sum-stats { margin-block: 12px; }
+.summary .xp-gain { color: var(--pri); }
+.summary .levelup {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.badge-new { border-color: var(--line); background: var(--ok-soft); }
+.sum-actions .btn { min-height: 48px; }
+
+@media (max-width: 360px) {
+  .choices:not(.audio, .tiles) { grid-template-columns: minmax(0, 1fr); }
+  .listen { gap: 10px; padding: 12px; }
+  .badges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.quiz, .match) :is(.qprog i, .choice, .tile, .mtile) { transition: none; }
+  :is(.quiz, .match) :is(.choice, .tile, .mtile):active { transform: none; }
+  .listen .play.playing { animation: none; }
+}

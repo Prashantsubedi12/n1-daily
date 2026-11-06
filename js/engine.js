@@ -3,7 +3,7 @@
 import { DB } from './data.js';
 import { getState, srs, todayStr, addDays, isMastered } from './store.js';
 import { shuffle } from './util.js';
-import { estimateScores } from './estimate.js';
+import { firstAttemptEvidence } from './estimate.js';
 
 export const TYPES = {
   kanji:       { label: '漢字読み',       mondai: '問題1', sec: 'lang' },
@@ -75,9 +75,8 @@ export function aggregate(days = 14) {
 
 export const rate = a => (a && a.n ? a.c / a.n : null);
 
-// Estimated JLPT section scores from the last `days` days of answers (see estimate.js).
-export function estimate(days = 14) {
-  return estimateScores(getState().log, DB.q, addDays(todayStr(), -(days - 1)));
+export function evidence(days = 14) {
+  return firstAttemptEvidence(getState().log, DB.q, addDays(todayStr(), -(days - 1)));
 }
 
 export function weakTags(agg, limit = 12) {
@@ -183,6 +182,38 @@ function passageRound(pool, targetQ) {
     n += e.qs.length;
   }
   return picked.flatMap(e => e.qs.map(q => q.id));
+}
+
+// A short, self-contained drill. Use recent mistakes to choose the skill, then
+// prefer an unseen passage with authored answer evidence.
+export function recommendReading(date = todayStr(), { bankOnly = false } = {}) {
+  const attempts = getState().log.filter(a => !a.rt && !a.assisted && DB.q[a.id]?.type === 'reading');
+  const seenPassages = new Set(attempts.map(a => DB.q[a.id].passage));
+  const recentMistakes = new Map();
+  const since = addDays(date, -13);
+  for (const attempt of [...attempts].sort((a, b) => a.t - b.t)) {
+    if (attempt.d >= since && attempt.d <= date) recentMistakes.set(attempt.id, attempt);
+  }
+  const weak = new Map();
+  for (const { id, ok, lk } of recentMistakes.values()) {
+    if (ok && !lk) continue;
+    for (const tag of DB.q[id].tags || []) weak.set(tag, (weak.get(tag) || 0) + 1);
+  }
+  const candidates = DB.list.flatMap(q => {
+    const passage = DB.passages[q.passage];
+    if (q.type !== 'reading' || q.level !== 'N1' || q.sub !== 'short' || !passage || (q.date && (bankOnly || q.date > date))) return [];
+    const tag = [...(q.tags || [])].sort((a, b) => (weak.get(b) || 0) - (weak.get(a) || 0))[0];
+    return [{ q, passage, tag, misses: weak.get(tag) || 0, seen: seenPassages.has(passage.id) }];
+  });
+  candidates.sort((a, b) => Number(a.seen) - Number(b.seen)
+    || b.misses - a.misses || Number(!!b.q.evidence) - Number(!!a.q.evidence)
+    || a.q.id.localeCompare(b.q.id));
+  const next = candidates[0];
+  if (!next) return null;
+  const reason = next.misses ? `最近迷った「${next.tag}」を練習します。`
+    : next.seen ? '前に読んだ文章で、答えの根拠をもう一度確認します。'
+    : 'まずは短文1題。答えの根拠を本文から探しましょう。';
+  return { ids: [next.q.id], minutes: Math.max(1, Math.round((next.passage.target || 150) / 60)), reason };
 }
 
 export function buildRound(kind, arg) {

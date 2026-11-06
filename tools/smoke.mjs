@@ -6,9 +6,10 @@
 //   node tools/smoke.mjs                         # serves this folder locally and tests it
 //   node tools/smoke.mjs --url https://prashantsubedi12.github.io/n1-daily/   # tests the live site
 //
-// Uses a fresh browser profile with no GitHub token, so it never writes to the progress branch.
+// Uses an isolated browser profile and synthetic study activity.
 
 import { createServer } from 'node:http';
+import assert from 'node:assert/strict';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { join, dirname, extname, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -35,7 +36,10 @@ function serve() {
       res.end('not found');
     }
   });
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
 }
 
 const problems = [];
@@ -55,14 +59,26 @@ const base = urlArg || `http://127.0.0.1:${server.address().port}/`;
 const profile = await mkdtemp(join(tmpdir(), 'n1smoke-'));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, userDataDir: profile, args: ['--no-first-run'] });
 const page = await browser.newPage();
-await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+const mobileViewport = width => page.setViewport({
+  width, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+});
+await mobileViewport(390);
 
 const origin = new URL(base).origin;
+let testingOffline = false;
+const optionalContent = url => /\/data\/(?:daily\/|changelog\.json$)/.test(url || '');
 page.on('pageerror', e => problems.push(`page error: ${e.message}`));
+page.on('dialog', async dialog => {
+  if (dialog.type() === 'confirm' && dialog.message().startsWith('途中のラウンドがあります。')) return dialog.accept();
+  problems.push(`unexpected dialog: ${dialog.message()}`);
+  await dialog.dismiss();
+});
 page.on('console', m => {
+  if (testingOffline && m.text().includes('503') && optionalContent(m.location().url)) return;
   if (m.type() === 'error') problems.push(`console error: ${m.text()}`);
 });
 page.on('response', r => {
+  if (testingOffline && r.status() === 503 && optionalContent(new URL(r.url()).pathname)) return;
   if (r.url().startsWith(origin) && r.status() >= 400) problems.push(`HTTP ${r.status()} ${r.url().replace(origin, '')}`);
 });
 
@@ -79,10 +95,58 @@ const go = async hash => {
 };
 const state = () => page.evaluate(() => JSON.parse(localStorage.getItem('n1daily.v1') || '{}'));
 
+async function checkPalette(scheme, expected) {
+  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: scheme }]);
+  const palette = await page.evaluate(keys => {
+    const css = getComputedStyle(document.documentElement);
+    return Object.fromEntries(keys.map(key => [key, css.getPropertyValue(key).trim().toLowerCase()]));
+  }, Object.keys(expected));
+  assert.deepEqual(palette, expected, `${scheme} theme tokens`);
+}
+
+async function checkRouteLayout(width, tab, { home = false, study = false } = {}) {
+  const layout = await page.evaluate(({ home }) => {
+    const root = document.documentElement;
+    const body = getComputedStyle(document.body);
+    const heading = document.querySelector(home ? 'main h1' : 'main .page-title');
+    const primary = document.querySelector('#priorityStart');
+    const nav = document.querySelector('#tabbar');
+    const primaryBox = primary?.getBoundingClientRect();
+    return {
+      width: Math.max(root.scrollWidth, document.body.scrollWidth),
+      font: body.fontFamily,
+      fontSize: Number.parseFloat(body.fontSize),
+      leading: Number.parseFloat(body.lineHeight),
+      title: heading ? Number.parseFloat(getComputedStyle(heading).fontSize) : 0,
+      active: [...nav.querySelectorAll('[aria-current="page"]')].map(el => el.dataset.tab),
+      navHidden: getComputedStyle(nav).display === 'none',
+      visibleAction: primaryBox && primaryBox.height >= 44 && primaryBox.bottom <= nav.getBoundingClientRect().top,
+    };
+  }, { home });
+  // Compare to the configured width because mobile Chrome may expand innerWidth on overflow.
+  assert.ok(layout.width <= width + 1, `content is ${layout.width}px wide at ${width}px`);
+  assert.match(layout.font, /Hiragino|Noto Sans JP|Yu Gothic|Meiryo/i, 'Japanese font stack');
+  assert.ok(layout.fontSize >= 16 && layout.leading >= layout.fontSize * 1.5, 'mobile body typography');
+  if (!study) assert.ok(layout.title >= 20, 'page title is visually distinct');
+  assert.equal(layout.navHidden, study, 'bottom navigation visibility');
+  assert.deepEqual(layout.active, tab ? [tab] : [], 'current tab');
+  if (home) assert.ok(layout.visibleAction, '44px priority action above the bottom navigation');
+}
+
+async function checkNarrowStudyLayout() {
+  try {
+    await mobileViewport(320);
+    await checkRouteLayout(320, null, { study: true });
+  } finally {
+    await mobileViewport(390);
+  }
+}
+
 // Picks an answer: first choice, or for 文の組み立て taps every piece into the blanks.
 async function pickAnswer() {
   if (await page.$('.choice:not([disabled])')) return tap('.choice:not([disabled])');
   while (await page.$('.tile:not([disabled])')) await tap('.tile:not([disabled])');
+  await tap('[data-act="submit-order"]:not([disabled])');
 }
 
 // Answers the current question, opens the explanation, moves on. Returns false when the round is over.
@@ -109,7 +173,7 @@ async function exitRound() {
 }
 
 const flow = [
-  step('home loads with coach, goal ring, menu and score card', async () => {
+  step('home shows the coach, reading mission and all study shortcuts on mobile', async () => {
     await page.goto(base + '#/', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.menu-item');
     await page.waitForSelector('.coach');
@@ -117,6 +181,45 @@ const flow = [
     await page.waitForSelector('.buddy .ring');
     await page.waitForSelector('.quests .quest-list li');
     await page.waitForSelector('.buddy .lvl');
+    assert.deepEqual(await page.$$eval('#tabbar a', links => links.map(a => a.textContent.trim())),
+      ['ホーム', '新出', '練習', '復習', '記録']);
+    assert.deepEqual(await page.$$eval('.menu [data-menu]', buttons => buttons.map(button => button.dataset.menu)),
+      ['review', 'lang', 'read', 'listen']);
+    await checkPalette('light', { '--bg': '#faf6ed', '--card': '#fffdf8', '--pri': '#244ca6' });
+    try {
+      for (const width of [320, 390, 430]) {
+        await mobileViewport(width);
+        await checkRouteLayout(width, 'home', { home: true });
+      }
+      await mobileViewport(390);
+      await checkPalette('dark', { '--bg': '#191714' });
+      await checkRouteLayout(390, 'home', { home: true });
+    } finally {
+      await mobileViewport(390);
+      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+    }
+  }),
+  step('priority drill: reveal evidence, reload feedback, then complete once', async () => {
+    await tap('#priorityStart');
+    await page.waitForSelector('.passage');
+    await checkNarrowStudyLayout();
+    const order = await page.$$eval('.choice', buttons => buttons.map(b => b.dataset.i));
+    await pickAnswer();
+    await tap('.reading-evidence summary');
+    await page.waitForSelector('.reading-evidence[open] blockquote');
+    await page.waitForSelector('.reading-distractor');
+    const answered = await state();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.fb');
+    const restoredOrder = await page.$$eval('.choice', buttons => buttons.map(b => b.dataset.i));
+    if (restoredOrder.join() !== order.join() || (await state()).log.length !== answered.log.length) throw new Error('reload lost quiz state');
+    await tap('[data-act="next"]');
+    await page.waitForSelector('.summary');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.summary');
+    if ((await state()).events.filter(e => e.k === 'end' && e.m === 'priority').length !== 1) throw new Error('priority completion was not recorded exactly once');
+    await tap('[data-act="home"]');
+    await page.waitForFunction(() => document.querySelector('.priority')?.textContent.includes('クリアしました'));
   }),
   step('語彙・文法: answer, report a question, leave mid-round', async () => {
     await startMenu('lang');
@@ -132,7 +235,7 @@ const flow = [
     await exitRound();
     const st = await state();
     if (st.feedback?.length !== 1 || !st.feedback[0].id) throw new Error('question report was not saved');
-    if (!st.events?.some(e => e.k === 'end' && e.fin === 0)) throw new Error('abandoned round not logged');
+    if (!st.activeQuiz || st.events.some(e => e.k === 'end' && e.m === 'lang')) throw new Error('suspended round was not retained');
   }),
   step('語彙・文法: resume and finish to the result screen', async () => {
     await startMenu('lang');
@@ -154,7 +257,12 @@ const flow = [
   }),
   step('聴解: listening round renders and answers', async () => {
     await startMenu('listen');
+    await page.evaluate(() => { speechSynthesis.getVoices = () => []; });
+    await tap('[data-act="play"]');
+    await tap('[data-act="transcript"]');
+    await page.waitForSelector('.listen .script[open]');
     await answerOne();
+    if (!(await state()).log.at(-1)?.assisted) throw new Error('transcript answer was not marked as assisted');
     await exitRound();
   }),
   step('文の組み立て: pieces fill the blanks and ★ is graded', async () => {
@@ -162,12 +270,21 @@ const flow = [
     await tap('[data-type="order"]');
     await page.waitForSelector('.tile');
     while (await page.$('.tile:not([disabled])')) await tap('.tile:not([disabled])');
+    const submit = '[data-act="submit-order"]:not([disabled])';
+    await page.waitForSelector(submit);
+    if (await page.$('.fb')) throw new Error('order was graded before confirmation');
+    await tap('.slot[data-s="0"]');
+    if (await page.$(submit)) throw new Error('undo did not empty the slot');
+    await tap('.tile:not([disabled])');
+    await tap(submit);
     await page.waitForSelector('.slot.star.correct, .slot.star.wrong');
     await page.waitForSelector('.fb');
     await exitRound();
   }),
   step('漢字マッチ: clear both boards', async () => {
     await go('#/match');
+    await page.waitForSelector('.match-head');
+    await checkNarrowStudyLayout();
     for (let i = 0; i < 20 && !(await page.$('.match-done')); i++) {
       const k = await page.$eval('.mtile.w:not([disabled])', b => b.dataset.k).catch(() => null);
       if (!k) {
@@ -195,13 +312,34 @@ const flow = [
     await go('#/stats');
     await page.waitForSelector('.badges .badge.got');
   }),
-  ...['practice', 'review', 'stats', 'settings'].map(r =>
-    step(`#/${r} renders`, async () => {
-      await go('#/' + r);
-      await page.waitForSelector('.page-title');
+  ...[
+    ['learn', /新出/, true],
+    ['practice', /^分野別練習$/, true],
+    ['review', /^復習$/, true],
+    ['stats', /^記録$/, true],
+    ['settings', /^設定$/, false],
+    ['feedback', /^意見・更新$/, false],
+  ].map(([route, title, isTab]) =>
+    step(`#/${route} uses the shared mobile theme and tab state`, async () => {
+      try {
+        await go('#/' + route);
+        await page.waitForFunction((pattern, tab) =>
+          new RegExp(pattern).test(document.querySelector('.page-title')?.textContent.trim() || '') &&
+          (document.querySelector('[aria-current="page"]')?.dataset.tab || '') === tab,
+        {}, title.source, isTab ? route : '');
+        for (const width of [320, 390, 430]) {
+          await mobileViewport(width);
+          await checkRouteLayout(width, isTab ? route : null);
+        }
+        await checkPalette('dark', { '--bg': '#191714' });
+        await checkRouteLayout(430, isTab ? route : null);
+      } finally {
+        await mobileViewport(390);
+        await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+      }
     }),
   ),
-  step('意見・更新: send feedback without a token', async () => {
+  step('意見・更新: save feedback on this device', async () => {
     await go('#/feedback');
     await page.type('#fbText', 'smoke test');
     await tap('#fbSend');
@@ -214,6 +352,27 @@ const flow = [
     if (!(st.log?.length >= 3)) throw new Error(`only ${st.log?.length || 0} answers recorded`);
     if (!st.events?.some(e => e.k === 'open')) throw new Error('app open not logged');
   }),
+  ...(!urlArg ? [step('offline: reload an installed shell with playable bank content', async () => {
+    await page.waitForFunction(() => document.querySelector('#offlineReady')?.textContent.includes('オフライン'), { timeout: 20000 });
+    testingOffline = true;
+    // Stop the origin itself so navigation, modules and worker fetches all lose the network.
+    await new Promise((resolve, reject) => {
+      server.close(err => err ? reject(err) : resolve());
+      server.closeAllConnections();
+    });
+    try {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.menu');
+      await startMenu('read');
+      await page.waitForSelector('.passage');
+      await exitRound();
+    } catch (err) {
+      const visible = await page.evaluate(() => document.querySelector('main')?.innerText || document.body?.innerText).catch(() => '');
+      throw new Error(`${err.message.split('\n')[0]} at ${page.url()} (${visible?.trim().slice(0, 160) || 'empty page'})`);
+    } finally {
+      testingOffline = false;
+    }
+  })] : []),
 ];
 
 for (const s of flow) await s();
