@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-// Analyzes an explicitly selected private local export or a directory of fixtures.
+// Reads the learner's synced study records and prints the weakness report the nightly
+// generator and improver use.
 //
 // Usage:
-//   node tools/analyze.mjs --backup /private/path/backup.json
-//   node tools/analyze.mjs --dir /private/path/fixtures --json
+//   git fetch origin progress
+//   node tools/analyze.mjs                       # progress files from origin/progress (default)
+//   node tools/analyze.mjs --backup FILE.json    # or a 設定 backup export
+//   node tools/analyze.mjs --dir path/           # or a folder of progress JSON files
+//   node tools/analyze.mjs --json                # machine-readable output
 //   Add --gate FILE to check new activity or --mark FILE after handling it.
 
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BACKUP_KIND, BACKUP_VERSION } from '../js/backup.js';
@@ -21,6 +26,7 @@ const opt = name => {
 };
 const dir = opt('--dir');
 const backup = opt('--backup');
+const ref = opt('--ref') || 'origin/progress';
 const asJSON = args.includes('--json');
 const gateFile = opt('--gate');
 const markFile = opt('--mark');
@@ -42,7 +48,13 @@ for (const f of files) {
 
 // ---- load attempts ----
 function progressDocs() {
-  if (Boolean(dir) === Boolean(backup)) throw new Error('Pass exactly one private input using --backup FILE or --dir DIRECTORY.');
+  if (dir && backup) throw new Error('Pass at most one of --backup FILE or --dir DIRECTORY.');
+  if (!dir && !backup) {
+    const names = execFileSync('git', ['ls-tree', '-r', '--name-only', ref, '--', 'progress/'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter(n => n.endsWith('.json'));
+    return names.map(n => JSON.parse(execFileSync('git', ['show', `${ref}:${n}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 })));
+  }
   if (dir) {
     return readdirSync(dir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')));
   }
@@ -69,11 +81,14 @@ try {
   process.exit(1);
 }
 const byT = (a, b) => a.t - b.t;
-const allAttempts = docs.flatMap(d => d.attempts || []).sort(byT);
+// The same record can arrive twice (a backup merged into another device, or a day re-sent
+// after an upgrade), so keep one per record id; files from before v13 have no rid.
+const uniq = (list, key) => [...new Map(list.map(x => [x.rid || key(x), x])).values()];
+const allAttempts = uniq(docs.flatMap(d => d.attempts || []), a => `${a.t}:${a.id}`).sort(byT);
 const attempts = allAttempts.filter(a => !a.rt);
 // Added in app v8: round/open events, feedback notes and 覚えた cards.
-const events = docs.flatMap(d => d.events || []).sort(byT);
-const feedback = docs.flatMap(d => d.feedback || []).sort(byT);
+const events = uniq(docs.flatMap(d => d.events || []), e => `${e.t}:${e.k}`).sort(byT);
+const feedback = uniq(docs.flatMap(d => d.feedback || []), f => `${f.t}:${f.text}`).sort(byT);
 const learned = docs.flatMap(d => (d.learned || []).map(id => ({ id, d: d.date })));
 const appVersions = [...new Set(docs.map(d => d.app).filter(Boolean))];
 

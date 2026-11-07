@@ -572,3 +572,7 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
 @media (prefers-reduced-motion: reduce) {
   .xp-pop, .levelup, .badge-new, .quest-list li.just, .slot.filled, .slot.wrong, .mtile.matched, .mtile.nope { animation: none !important; }
 }
+
+/* 設定 → 同期 */
+.row-btns { display: flex; gap: 8px; }
+.row-btns .btn { flex: 1; }

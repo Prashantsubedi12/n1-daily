@@ -5,8 +5,9 @@ import {
   resetProgress, getPersistenceError,
 } from './store.js';
 import { MAX_BACKUP_BYTES } from './backup.js';
+import * as sync from './sync.js';
 import { TYPES, SUBS, SECTIONS, aggregate, rate, weakTags, wrongList, dueList, typeLabel, readingSpeed, secOf } from './engine.js';
-import { $, $$, esc, fmt, plain, pct, mmss } from './util.js';
+import { $, $$, esc, fmt, plain, pct, mmss, ago } from './util.js';
 import * as tts from './speech.js';
 import { progress, badges, XP } from './game.js';
 
@@ -260,6 +261,17 @@ export function viewSettings(view) {
       <p class="small muted">${voices.length ? `日本語の声：${voices.length}種類` : '日本語の声が見つかりません。'}iPhoneは「設定 → アクセシビリティ → 読み上げコンテンツ → 声 → 日本語」で高品質の声（Kyoko 拡張・Otoya 拡張）を追加できます。</p>
     </section>
 
+    <section class="card form" id="syncCard">
+      <div class="card-label">夜の問題作成と同期</div>
+      <p class="small">解答をGitHubに送ると、毎晩のAIがあなたの間違いを読んで、次の日の問題を作ります。</p>
+      <label class="field"><span>トークン</span><input id="ghToken" type="password" value="${sync.hasToken() ? '••••••••' : ''}" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <div class="row-btns">
+        <button class="btn" id="ghTest">接続テスト</button>
+        <button class="btn primary" id="ghSync">今すぐ同期</button>
+      </div>
+      <p class="small muted" id="ghStatus" role="status">${syncStatus()}</p>
+    </section>
+
     <section class="card form">
       <div class="card-label">学習記録とバックアップ</div>
       <p class="small">学習記録はこのアプリ内に保存されます。別の端末やSafariから移すときは、バックアップを使ってください。</p>
@@ -297,6 +309,29 @@ export function viewSettings(view) {
       { who: 'M', text: 'ええ、昨日のうちに仕上げておきました。' },
     ]),
   );
+
+  // The field shows dots once a token is saved; only a newly typed value replaces it.
+  const token = () => {
+    const v = $('#ghToken').value.trim();
+    if (v && !v.startsWith('•')) sync.setToken(v);
+    if (!v) sync.setToken('');
+  };
+  const ghStatus = msg => { $('#ghStatus').textContent = msg; };
+  $('#ghToken').addEventListener('change', token);
+  $('#ghTest').addEventListener('click', async () => {
+    token();
+    ghStatus('確認中…');
+    try {
+      ghStatus(await sync.testConnection());
+    } catch (e) {
+      ghStatus(`通信エラー：${e.message}`);
+    }
+  });
+  $('#ghSync').addEventListener('click', async () => {
+    token();
+    ghStatus('同期中…');
+    ghStatus((await sync.syncNow()).msg);
+  });
 
   const status = msg => { $('#backupStatus', view).textContent = msg; };
   const updated = msg => {
@@ -361,6 +396,12 @@ export function viewSettings(view) {
   });
 }
 
+function syncStatus() {
+  const s = sync.syncInfo();
+  if (!s.configured) return `未設定・アプリ ${APP_VERSION}`;
+  return `アプリ ${APP_VERSION}・最終同期：${s.last ? ago(s.last) : 'まだ'}・この端末の解答 ${getState().log.length}問${s.error ? `・${s.error}` : ''}`;
+}
+
 // ---------- 意見・更新: notes to the improver agent + what it changed ----------
 
 export function viewFeedback(view) {
@@ -375,8 +416,8 @@ export function viewFeedback(view) {
       <div class="card-label">アプリへの意見</div>
       <p class="small muted">使いにくい所・欲しい機能を記録できます。問題の誤りは解説の下からメモできます。</p>
       <textarea id="fbText" rows="4" maxlength="1000" placeholder="例：読解の本文が長くて、問題に戻るのが大変"></textarea>
-      <button class="btn primary wide" id="fbSend">端末に保存</button>
-      <p class="small muted" id="fbStatus" role="status">メモはこの端末に保存されます。</p>
+      <button class="btn primary wide" id="fbSend">送る</button>
+      <p class="small muted" id="fbStatus" role="status">${sync.hasToken() ? 'メモは夜の改善エージェントに届きます。' : '同期が未設定のため、メモはこの端末だけに保存されます。'}</p>
     </section>
 
     ${
@@ -398,11 +439,15 @@ export function viewFeedback(view) {
       }
     </section>`;
 
-  $('#fbSend').addEventListener('click', () => {
+  $('#fbSend').addEventListener('click', async () => {
     const text = $('#fbText').value.trim();
     if (!text) return;
     addFeedback(text);
     $('#fbText').value = '';
-    $('#fbStatus').textContent = getPersistenceError() || '端末に保存しました。';
+    const err = getPersistenceError();
+    if (err || !sync.hasToken()) return void ($('#fbStatus').textContent = err || '端末に保存しました（同期は未設定）。');
+    $('#fbStatus').textContent = '送信中…';
+    const r = await sync.syncNow();
+    $('#fbStatus').textContent = r.ok ? '送りました。今夜の改善エージェントが読みます。' : `保存しました。送信は後で再試行します（${r.msg}）`;
   });
 }

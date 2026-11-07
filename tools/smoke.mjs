@@ -181,6 +181,8 @@ const flow = [
     await page.waitForSelector('.buddy .ring');
     await page.waitForSelector('.quests .quest-list li');
     await page.waitForSelector('.buddy .lvl');
+    // A fresh profile has no token, so ホーム must warn that tonight's AI can't see the answers.
+    assert.match(await page.$eval('.sync-line', el => el.textContent), /同期オフ/);
     assert.deepEqual(await page.$$eval('#tabbar a', links => links.map(a => a.textContent.trim())),
       ['ホーム', '新出', '練習', '復習', '記録']);
     assert.deepEqual(await page.$$eval('.menu [data-menu]', buttons => buttons.map(button => button.dataset.menu)),
@@ -344,6 +346,32 @@ const flow = [
     await page.type('#fbText', 'smoke test');
     await tap('#fbSend');
     await page.waitForFunction(() => document.querySelector('#fbStatus').textContent.includes('保存しました'));
+  }),
+  step('設定: token-gated sync sends today’s file to the progress branch', async () => {
+    await go('#/settings');
+    // Stand in for the GitHub API so the smoke test never writes to the real repo.
+    await page.evaluate(() => {
+      window.__puts = [];
+      const real = window.fetch;
+      window.fetch = async (url, opts = {}) => {
+        if (!String(url).startsWith('https://api.github.com/')) return real(url, opts);
+        if (opts.method === 'PUT') {
+          window.__puts.push(String(url));
+          return new Response(JSON.stringify({ content: { sha: 'x' } }), { status: 201 });
+        }
+        return new Response('{}', { status: 404 });
+      };
+    });
+    await page.type('#ghToken', 'github_pat_smoke');
+    await tap('#ghSync');
+    await page.waitForFunction(() => /送信しました|最新です/.test(document.querySelector('#ghStatus').textContent));
+    const puts = await page.evaluate(() => window.__puts);
+    if (!puts.some(u => /contents\/progress\/\d{4}-\d{2}-\d{2}_[^/]+\.json$/.test(u))) throw new Error(`no day file sent: ${puts}`);
+    const backup = await page.evaluate(() => localStorage.getItem('n1daily.v1'));
+    if (backup.includes('github_pat_smoke')) throw new Error('token leaked into the progress state');
+    await go('#/');
+    assert.match(await page.$eval('.sync-line', el => el.textContent), /同期：たった今/);
+    await page.evaluate(() => localStorage.removeItem('n1daily.sync'));
   }),
   step('home shows today’s answers after studying', async () => {
     await go('#/');

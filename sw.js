@@ -1,7 +1,7 @@
 // Keep the app shell on one release until its replacement is ready to activate.
 const SCOPE = self.registration.scope;
 const PREFIX = 'n1daily:' + SCOPE + ':';
-const VERSION = PREFIX + 'v13';
+const VERSION = PREFIX + 'v14';
 const SHELL = [
   './',
   'index.html',
@@ -10,6 +10,7 @@ const SHELL = [
   'js/app.js',
   'js/store.js',
   'js/backup.js',
+  'js/sync.js',
   'js/data.js',
   'js/engine.js',
   'js/quiz.js',

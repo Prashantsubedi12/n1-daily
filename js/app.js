@@ -5,7 +5,8 @@ import { startQuiz, renderQuiz, hasSession, leaveQuiz, quizKey, questList, resto
 import { viewMatch, leaveMatch } from './match.js';
 import { progress, todayQuests, newBadges } from './game.js';
 import { viewPractice, viewReview, viewStats, viewSettings, viewFeedback } from './pages.js';
-import { $, $$, esc, fmt, toast, pct } from './util.js';
+import { $, $$, esc, fmt, toast, pct, ago } from './util.js';
+import * as sync from './sync.js';
 import { MIN_ANSWERS, MIN_TYPES, MIN_PASSAGES } from './estimate.js';
 import * as tts from './speech.js';
 import { mascot, greeting, ring, sparkle, confetti } from './coach.js';
@@ -278,7 +279,7 @@ function viewHome() {
 
   ${packNotice ? `<div class="content-status small muted"><p>${packNotice}</p><button class="btn" id="retryContent">教材を再確認</button></div>` : ''}
   <section class="sync-line small muted">
-    <span>学習記録はこの端末に保存</span>
+    <span>${syncLine()}</span>
     <span><a class="gear" href="#/feedback">意見・更新</a>　<a class="gear" href="#/settings" aria-label="設定">設定 ›</a></span>
   </section>`;
 
@@ -459,6 +460,14 @@ async function registerSW() {
   }
 }
 
+// One line on ホーム telling him whether tonight's generator will see today's answers.
+function syncLine() {
+  const s = sync.syncInfo();
+  if (!s.configured) return '<a class="gear ng" href="#/settings">⚠️ 同期オフ：設定でトークンを入力</a>';
+  if (s.error) return `<span class="ng">同期エラー</span>`;
+  return `同期：${s.last ? ago(s.last) : 'まだ'}`;
+}
+
 function renderPersistenceStatus() {
   const status = $('#persistenceStatus');
   if (!status) return;
@@ -486,12 +495,18 @@ async function boot() {
   }
   restoreQuiz(bindRound);
   window.addEventListener('hashchange', route);
+  // Every screen change (finishing a round, leaving 漢字マッチ, saving a note) sends what's new.
+  window.addEventListener('hashchange', () => sync.syncSoon());
   route();
   noteOpen();
   window.addEventListener('online', checkOfflineStatus);
+  window.addEventListener('online', () => sync.syncSoon(0));
+  sync.syncSoon(0);
   let lastDay = `${todayStr()}/${contentDateJst()}`;
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
+    // Closing the app mid-round still sends the answers so far.
+    if (document.hidden) return void (sync.hasPending() && sync.syncNow());
+    sync.syncSoon(0);
     noteOpen();
     checkOfflineStatus();
     const day = `${todayStr()}/${contentDateJst()}`;
