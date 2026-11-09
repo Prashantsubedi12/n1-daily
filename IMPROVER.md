@@ -108,3 +108,9 @@ Reported questions (`Reported questions`) are NOT yours — the nightly generato
 - 2026-11-07 v14 (by hand): sync restored as js/sync.js (token in its own key, re-sends a day when any record changes,
   syncs on start/return/leave/screen change), ホーム shows ⚠️ when sync is off, analyze.mjs reads origin/progress
   again by default and dedupes by record id, ROUTINE.md/IMPROVER.md restored with Codex's useful checks kept.
+- 2026-11-09 no change (agent): gate active (3 finished rounds, 24 answers since 11-02). Data too thin to justify an
+  app change — 4 study days, 41 answers total, only 2 days on v14; the 11-02 note (more design/interactive) was already
+  answered by v9/v10. Signals to watch: 語彙 accuracy 30% (kanji 20%, context 17–29%) with fast wrong picks (6–12s =
+  guessing unknown words); 読解 has 1 answer and 聴解 0, so no section estimate yet; opened-but-no-answers on 11-08, a day
+  with no daily file (generator skipped 11-08). If 読解/聴解 stay near zero next week, push them from 今日の最優先 or ROUTINE.md.
+  Local + live smoke OK.
