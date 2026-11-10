@@ -1,1 +1,1 @@
-{"device":"v6pp3k","date":"2026-11-10","app":"v14","attempts":[],"events":[{"rid":"a1b7a7f1-86ed-4646-a3ef-af06519b754a","k":"open","t":1794296146691,"d":"2026-11-10"}],"feedback":[],"learned":[]}
+{"device":"v6pp3k","date":"2026-11-10","app":"v14","attempts":[],"events":[{"rid":"a1b7a7f1-86ed-4646-a3ef-af06519b754a","t":1794296146691,"d":"2026-11-10","k":"open"},{"rid":"ce8e180f-d875-44f1-b866-b1ad6b836f56","k":"open","t":1794302997378,"d":"2026-11-10"}],"feedback":[],"learned":[]}
