@@ -3,7 +3,7 @@
 import { DB } from './data.js';
 import { getState, save, recordAttempt, setLucky, addFeedback, todayStr } from './store.js';
 import { secOf, typeLabel } from './engine.js';
-import { $, $$, esc, fmt, paras, mmss, shuffle, plain, toast } from './util.js';
+import { $, $$, esc, fmt, paras, mmss, shuffle, plain, toast, icon } from './util.js';
 import * as tts from './speech.js';
 import { mascot, reaction, summaryLine, ring, sparkle, confetti } from './coach.js';
 import { progress, todayQuests, newBadges, sound } from './game.js';
@@ -196,7 +196,7 @@ export function renderQuiz(root) {
   root.innerHTML = `
   <div class="quiz${getState().settings.mincho ? ' mincho' : ''}" data-study-skill="${secOf(q)}">
     <div class="quiz-top">
-      <button class="icon-btn" data-act="exit" aria-label="中断してホームへ">✕</button>
+      <button class="icon-btn" data-act="exit" aria-label="中断してホームへ">${icon('close', 20)}</button>
       <div class="qprog" role="progressbar" aria-label="問題の進み具合" aria-valuemin="0" aria-valuenow="${S.pos}" aria-valuemax="${n}"><i style="width:${(S.pos / n) * 100}%"></i></div>
       ${p ? '<span class="ptimer" id="ptimer"></span>' : ''}
       <span class="combo" id="combo"${S.combo >= 2 ? '' : ' hidden'}>🔥${S.combo}</span>
@@ -210,7 +210,7 @@ export function renderQuiz(root) {
     ${p ? passageHTML(p) : ''}
     ${q.type === 'listening' ? listenHTML(q) : ''}
     ${q.q ? `<div class="qtext" id="qtext" tabindex="-1">${order ? orderText(q.q) : fmt(q.q)}</div>` : ''}
-    ${order ? '<p class="small muted order-hint">タップして並べよう。置いた語句をもう一度タップすると取り消せます。★に入るものが答えです。</p>' : ''}
+    ${order ? '<p class="small muted order-hint">タップで並べる・もう一度タップで戻す。★が答え。</p>' : ''}
     <div class="choices${order ? ' tiles' : longChoices ? ' long' : ''}${hiddenChoices ? ' audio' : ''}">
       ${S.order
         .map((orig, i) =>
@@ -499,7 +499,7 @@ function renderFeedback(q, root, fresh = false, gain = 0) {
       ${q.exp ? `<div class="exp">${fmt(q.exp)}</div>` : ''}
       ${q.en && showEn() ? `<div class="en">${esc(q.en)}</div>` : ''}
       ${q.type === 'listening' && !S.transcript ? scriptHTML(q) : ''}
-      <div class="report-q" id="reportQ">${reported ? '<span class="small muted">この端末に記録しました。</span>' : '<button class="linkish" data-act="report">⚑ この問題を報告</button>'}</div>
+      <div class="report-q" id="reportQ">${reported ? '<span class="small muted">この端末に記録しました。</span>' : `<button class="linkish" data-act="report">${icon('flag', 14)} 問題を報告</button>`}</div>
     </div>`;
   $('[data-act="report"]', root)?.addEventListener('click', () => {
     const box = $('#reportQ', root);

@@ -135,7 +135,6 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
 .brand { display: flex; align-items: center; gap: 8px; }
 .brand-mark { color: var(--blossom); width: 30px; height: 30px; flex: none; }
 .hero h1 { font-size: 1.45em; line-height: 1.12; letter-spacing: -0.025em; }
-.brand-sub { margin: 2px 0 0; color: var(--sub); font-size: 0.72em; line-height: 1.3; }
 .home-date { text-align: right; color: var(--sub); font-size: 0.73em; line-height: 1.45; }
 .home-date time { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .countdown b { color: var(--pri); margin-inline-start: 0.25em; }
@@ -168,7 +167,7 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
   --skill-soft: var(--pri-soft);
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 7px; width: 100%; height: 100%;
   align-items: start; padding: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 13px;
-  text-align: start; color: inherit; cursor: pointer; min-height: 82px; box-shadow: var(--shadow);
+  text-align: start; color: inherit; cursor: pointer; min-height: 72px; box-shadow: var(--shadow);
 }
 .menu-item[data-menu="review"] { --skill-ink: var(--ok); --skill-soft: var(--ok-soft); }
 .menu-item[data-menu="lang"] { --skill-ink: var(--lang-ink); --skill-soft: var(--lang-soft); }
@@ -180,13 +179,11 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
 .mi-icon svg { width: 18px; height: 18px; }
 .mi-body { display: flex; flex-direction: column; gap: 1px; line-height: 1.35; overflow-wrap: anywhere; }
 .mi-body b { font-size: 0.93em; }
-.mi-body .muted { font-size: 0.72em; }
 .mi-stat { grid-column: 2; align-self: end; display: flex; justify-content: space-between; gap: 4px; font-size: 0.75em; font-weight: 650; color: var(--skill-ink); }
 .menu-item .bar-track { grid-column: 2; width: 100%; height: 4px; margin: 0; }
 .menu-item .bar-track i { background: var(--skill-ink); }
 .menu-item.done .bar-track i { background: var(--ok); }
 .menu-item.done .mi-stat { color: var(--ok); }
-.learn-link { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; color: var(--ink); text-decoration: none; }
 @media (max-width: 360px) {
   .mi-icon { width: 24px; height: 24px; }
   .mi-icon svg { width: 16px; height: 16px; }
@@ -201,11 +198,15 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
 }
 .stat b { font-size: 1.35em; }
 .stat span { font-size: 0.72em; color: var(--sub); }
-.home-stats .stat:nth-child(1) b { color: var(--ok); }
-.home-stats .stat:nth-child(2) b { color: var(--lang-ink); }
-.home-stats .stat:nth-child(3) b { color: var(--pri); }
 .sync-line { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin: 10px 2px; }
 .gear { white-space: nowrap; }
+.ic { display: block; flex: none; }
+.linkish .ic { display: inline-block; vertical-align: -2px; }
+.icon-btn .ic { margin: auto; }
+.say .ic { display: inline-block; vertical-align: -3px; }
+.more-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+.more-links .btn { margin: 0; text-decoration: none; }
+details.help > summary.card-label { color: var(--sub); margin: 0; min-height: 44px; align-content: center; }
 
 /* ---------- learn ---------- */
 .lcard {
@@ -403,7 +404,7 @@ code { font-size: 0.85em; background: var(--pri-soft); padding: 0 4px; border-ra
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   min-height: 52px; padding: 5px 0; text-decoration: none; color: var(--sub); font-size: 0.72em;
 }
-.tabbar svg { width: 38px; height: 28px; padding: 3px 8px; border-radius: 999px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabbar svg { width: 38px; height: 28px; padding: 3px 8px; border-radius: 999px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .tabbar a.active { color: var(--pri); font-weight: 700; }
 .tabbar a.active svg { background: var(--pri-soft); }
 

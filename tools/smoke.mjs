@@ -179,7 +179,6 @@ const flow = [
     await page.waitForSelector('.coach');
     await page.waitForSelector('.buddy .momo');
     await page.waitForSelector('.buddy .ring');
-    await page.waitForSelector('.quests .quest-list li');
     await page.waitForSelector('.buddy .lvl');
     // A fresh profile has no token, so ホーム must warn that tonight's AI can't see the answers.
     assert.match(await page.$eval('.sync-line', el => el.textContent), /同期オフ/);
@@ -310,8 +309,10 @@ const flow = [
       if (!Object.keys(st.learned || {}).length) throw new Error('覚えた not saved');
     }
   }),
-  step('記録: level and badges render', async () => {
+  step('記録: quests, level and badges render', async () => {
     await go('#/stats');
+    await page.waitForSelector('.quests .quest-list li');
+    await page.waitForSelector('.lvl-card .lvl');
     await page.waitForSelector('.badges .badge.got');
   }),
   ...[

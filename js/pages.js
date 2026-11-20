@@ -8,8 +8,9 @@ import { MAX_BACKUP_BYTES } from './backup.js';
 import * as sync from './sync.js';
 import { TYPES, SUBS, SECTIONS, aggregate, rate, weakTags, wrongList, dueList, typeLabel, readingSpeed, secOf } from './engine.js';
 import { $, $$, esc, fmt, plain, pct, mmss, ago } from './util.js';
+import { questList } from './quiz.js';
 import * as tts from './speech.js';
-import { progress, badges, XP } from './game.js';
+import { progress, badges, XP, todayQuests } from './game.js';
 
 // ---------- 練習: by question type ----------
 
@@ -52,7 +53,7 @@ export function viewPractice(view, runRound) {
 
   view.innerHTML = `
     <h2 class="page-title">分野別練習</h2>
-    <p class="small muted">右の数字は解いた数 / 問題数、全期間の正答率。</p>
+    <p class="small muted">解いた数/全問・正答率</p>
     ${Object.entries(groups)
       .filter(([, items]) => items.length)
       .map(([sec, items]) => `<section class="practice-group" data-study-skill="${sec}"><h3 class="sec-title">${SECTIONS[sec]}</h3><ul class="rows">${list(items)}</ul></section>`)
@@ -86,16 +87,16 @@ export function viewReview(view, runRound) {
     <h2 class="page-title">復習</h2>
     <div class="card review-intro">
       <div class="row between">
-        <div><b>${due.length}</b> 問が復習のタイミング</div>
+        <div><b>${due.length}</b> 問が復習待ち</div>
         <button class="btn primary" id="dueBtn"${due.length ? '' : ' disabled'}>解く</button>
       </div>
-      <p class="small muted">間違えた問題は 1日後 → 2日後 → 4日後 → 7日後… と間隔を空けて出ます。</p>
+      <p class="small muted">1→2→4→7日後と間隔を空けて出ます。</p>
     </div>
     <div class="row between">
       <h3 class="sec-title">間違いノート <span class="muted small">${wrong.length}</span></h3>
       ${wrong.length ? '<button class="btn small" id="allWrong">まとめて解く</button>' : ''}
     </div>
-    ${!wrong.length ? '<p class="muted">まだありません。間違えた問題・「まぐれ」にした問題がここに溜まります。</p>' : ''}
+    ${!wrong.length ? '<p class="muted">間違えた問題がここに溜まります。</p>' : ''}
     <ul class="notebook">${wrong
       .slice(0, 150)
       .map(q => {
@@ -132,7 +133,6 @@ export function viewStats(view, runRound) {
   for (let i = 13; i >= 0; i--) days.push(addDays(today, -i));
   const maxN = Math.max(10, ...days.map(d => all.day[d]?.n || 0));
   const speed = readingSpeed(14);
-  const weak = weakTags(agg, 15);
   const studied = Object.keys(all.day).length;
   const g = progress();
   const bs = badges();
@@ -163,17 +163,10 @@ export function viewStats(view, runRound) {
     })
     .join('');
 
+  const quests = todayQuests();
+
   view.innerHTML = `
     <h2 class="page-title">記録</h2>
-    <section class="card lvl-card">
-      <div class="row between"><div class="card-label">⚡ レベル</div><span class="small muted">合計 ${g.xp} XP・最長 ${g.best}日連続${g.freezes ? `・🧊×${g.freezes}` : ''}</span></div>
-      <div class="lvl-row"><span class="lvl">Lv.${g.level}</span><span class="small"><b>${esc(g.title)}</b></span><div class="bar-track"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div><span class="small muted">${g.into}/${g.need}</span></div>
-      <p class="small muted">正解 +${XP.ok}・5連続 +${XP.combo5}・ラウンド完走 +${XP.round}・全問正解 +${XP.perfect}・クエスト +${XP.quest}・マッチ +${XP.match}</p>
-    </section>
-    <section class="card">
-      <div class="card-label">🏅 バッジ <span class="muted small">${bs.filter(b => b.got).length}/${bs.length}</span></div>
-      <div class="badges">${bs.map(b => `<div class="badge${b.got ? ' got' : ''}" title="${esc(b.desc)}"><span class="bicon">${b.got ? b.icon : '🔒'}</span><b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
-    </section>
     <section class="stat-row">
       <div class="stat"><b>${diffDays(today, EXAM_DATE)}</b><span>本番まで</span></div>
       <div class="stat"><b>${studied}</b><span>学習日数</span></div>
@@ -181,9 +174,27 @@ export function viewStats(view, runRound) {
     </section>
 
     <section class="card">
-      <div class="card-label">分野別 練習正答率（直近14日）</div>
+      <div class="card-label">分野別 正答率（14日）</div>
       ${['lang', 'read', 'listen'].map(secBar).join('')}
-      <p class="small muted">この集計には繰り返し練習も含みます。縦線は練習目標の70%です。本試験の合格基準は換算点で総合100/180点以上・各分野19点以上です。</p>
+      <p class="small muted">縦線は目標70%。合格は総合100/180・各分野19点以上。</p>
+    </section>
+
+    <section class="card quests">
+      <div class="row between"><div class="card-label">今日のクエスト</div><span class="small muted">${quests.filter(q => q.done).length}/3${quests.every(q => q.done) ? '・🧊ゲット' : '・全部で🧊'}</span></div>
+      ${questList(quests, quests.map(q => q.done))}
+      <a class="btn wide match-btn" href="#/match">漢字マッチ</a>
+    </section>
+
+    <section class="card lvl-card">
+      <div class="row between"><div class="card-label">レベル</div><span class="small muted">${g.xp} XP・最長 ${g.best}日${g.freezes ? `・🧊×${g.freezes}` : ''}</span></div>
+      <div class="lvl-row"><span class="lvl">Lv.${g.level}</span><span class="small"><b>${esc(g.title)}</b></span><div class="bar-track"><i style="width:${Math.round((g.into / g.need) * 100)}%"></i></div><span class="small muted">${g.into}/${g.need}</span></div>
+      <details class="help"><summary>XPのしくみ</summary><p class="small muted">正解 +${XP.ok}・5連続 +${XP.combo5}・完走 +${XP.round}・全問正解 +${XP.perfect}・クエスト +${XP.quest}・マッチ +${XP.match}</p></details>
+    </section>
+
+    <section class="card">
+      <details class="help"><summary class="card-label">バッジ ${bs.filter(b => b.got).length}/${bs.length}</summary>
+      <div class="badges">${bs.map(b => `<div class="badge${b.got ? ' got' : ''}" title="${esc(b.desc)}"><span class="bicon">${b.got ? b.icon : '🔒'}</span><b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
+      </details>
     </section>
 
     <section class="card">
@@ -201,18 +212,11 @@ export function viewStats(view, runRound) {
 
     ${
       speedRows
-        ? `<section class="card"><div class="card-label">読解スピード（14日）</div><table class="tbl"><thead><tr><th></th><th>文章</th><th>速さ</th><th>目安比</th></tr></thead><tbody>${speedRows}</tbody></table><p class="small muted">目安比100%以下なら本番の時間配分に間に合うペース。</p></section>`
+        ? `<section class="card"><div class="card-label">読解スピード（14日）</div><table class="tbl"><thead><tr><th></th><th>文章</th><th>速さ</th><th>目安比</th></tr></thead><tbody>${speedRows}</tbody></table><p class="small muted">100%以下なら本番に間に合うペース。</p></section>`
         : ''
     }
 
-    ${
-      weak.length
-        ? `<section class="card"><div class="card-label">弱点タグ（直近14日）</div><div class="chips">${weak
-            .map(w => `<button class="chip" data-tag="${esc(w.tag)}">${esc(w.tag)} <small>${w.c}/${w.n}</small></button>`)
-            .join('')}</div><p class="small muted">タップするとその項目だけ練習できます。</p></section>`
-        : ''
-    }`;
-  $$('[data-tag]', view).forEach(b => b.addEventListener('click', () => runRound('tag', b.dataset.tag, b.dataset.tag)));
+    <nav class="more-links"><a class="btn" href="#/settings">設定</a><a class="btn" href="#/feedback">意見・更新</a></nav>`;
 }
 
 // ---------- 設定 ----------
@@ -245,9 +249,9 @@ export function viewSettings(view) {
         <select id="daily">${[30, 50, 80].map(n => `<option value="${n}"${s.daily === n ? ' selected' : ''}>${n}問（約${Math.round(n * 1.2)}分）</option>`).join('')}</select>
       </label>
       <label class="switch"><input type="checkbox" id="showEn"${s.showEn ? ' checked' : ''}><span>解説に英語の補足を表示</span></label>
-      <label class="switch"><input type="checkbox" id="mincho"${s.mincho ? ' checked' : ''}><span>問題文を明朝体で表示（本番と同じ）</span></label>
+      <label class="switch"><input type="checkbox" id="mincho"${s.mincho ? ' checked' : ''}><span>問題文を明朝体に（本番と同じ）</span></label>
       <label class="switch"><input type="checkbox" id="big"${s.big ? ' checked' : ''}><span>文字を大きく</span></label>
-      <label class="switch"><input type="checkbox" id="sound"${s.sound ? ' checked' : ''}><span>効果音（正解・不正解・クリアの音）</span></label>
+      <label class="switch"><input type="checkbox" id="sound"${s.sound ? ' checked' : ''}><span>効果音</span></label>
     </section>
 
     <section class="card form">
@@ -258,12 +262,12 @@ export function viewSettings(view) {
       <label class="field"><span>女性の声</span><select id="voiceF">${voiceOpts(s.voiceF)}</select></label>
       <label class="field"><span>男性の声</span><select id="voiceM">${voiceOpts(s.voiceM)}</select></label>
       <button class="btn" id="testVoice">テスト再生</button>
-      <p class="small muted">${voices.length ? `日本語の声：${voices.length}種類` : '日本語の声が見つかりません。'}iPhoneは「設定 → アクセシビリティ → 読み上げコンテンツ → 声 → 日本語」で高品質の声（Kyoko 拡張・Otoya 拡張）を追加できます。</p>
+      <p class="small muted">${voices.length ? `日本語の声：${voices.length}種類。` : '日本語の声が見つかりません。'}iPhone：設定 → アクセシビリティ → 読み上げコンテンツ → 声 で Kyoko・Otoya（拡張）を追加。</p>
     </section>
 
     <section class="card form" id="syncCard">
       <div class="card-label">夜の問題作成と同期</div>
-      <p class="small">解答をGitHubに送ると、毎晩のAIがあなたの間違いを読んで、次の日の問題を作ります。</p>
+      <p class="small muted">解答を送ると、夜のAIが間違いから翌日の問題を作ります。</p>
       <label class="field"><span>トークン</span><input id="ghToken" type="password" value="${sync.hasToken() ? '••••••••' : ''}" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <div class="row-btns">
         <button class="btn" id="ghTest">接続テスト</button>
@@ -274,7 +278,7 @@ export function viewSettings(view) {
 
     <section class="card form">
       <div class="card-label">学習記録とバックアップ</div>
-      <p class="small">学習記録はこのアプリ内に保存されます。別の端末やSafariから移すときは、バックアップを使ってください。</p>
+      <p class="small muted">記録はこの端末に保存されます。端末を移すときに使います。</p>
       <button class="btn" id="export">バックアップを保存</button>
       <label class="field"><span>復元方法</span><select id="restoreMode"><option value="merge">現在の記録に追加</option><option value="replace">記録と設定を置き換え</option></select></label>
       <label class="field"><span>バックアップを読み込む</span><input type="file" id="import" accept=".json,application/json"></label>
@@ -414,7 +418,7 @@ export function viewFeedback(view) {
 
     <section class="card form">
       <div class="card-label">アプリへの意見</div>
-      <p class="small muted">使いにくい所・欲しい機能を記録できます。問題の誤りは解説の下からメモできます。</p>
+      <p class="small muted">使いにくい所・欲しい機能を書いてください。</p>
       <textarea id="fbText" rows="4" maxlength="1000" placeholder="例：読解の本文が長くて、問題に戻るのが大変"></textarea>
       <button class="btn primary wide" id="fbSend">送る</button>
       <p class="small muted" id="fbStatus" role="status">${sync.hasToken() ? 'メモは夜の改善エージェントに届きます。' : '同期が未設定のため、メモはこの端末だけに保存されます。'}</p>

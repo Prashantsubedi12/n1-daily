@@ -4,7 +4,7 @@
 
 import { DB } from './data.js';
 import { srs, isMastered, logEvent, getState } from './store.js';
-import { $, $$, esc, shuffle, mmss } from './util.js';
+import { $, $$, esc, shuffle, mmss, icon } from './util.js';
 import { mascot, sparkle, confetti } from './coach.js';
 import { sound, XP } from './game.js';
 
@@ -63,7 +63,7 @@ function renderBoard(view) {
   view.innerHTML = `
   <div class="match">
     <div class="quiz-top">
-      <button class="icon-btn" data-act="exit" aria-label="やめる">✕</button>
+      <button class="icon-btn" data-act="exit" aria-label="やめる">${icon('close', 20)}</button>
       <div class="qprog" aria-hidden="true"><i style="width:${(M.board / boards) * 100}%"></i></div>
       <span class="qcount" id="mtime">0:00</span>
     </div>
